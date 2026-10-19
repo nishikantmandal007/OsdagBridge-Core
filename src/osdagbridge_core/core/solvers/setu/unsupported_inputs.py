@@ -9,6 +9,11 @@ def refuse(key, value):
     raise ValueError(f"{key}={value!r} has no setu equivalent; choose the ospgrillage analysis engine")
 
 
+# Name a vehicle that neither engine analyses: ospgrillage builds only Class A and 70R cases and leaves it out.
+def refuse_vehicle(key, value):
+    raise ValueError(f"{key}={value!r}: this vehicle is not analysed by either engine (ospgrillage leaves it out without saying so); untick it")
+
+
 # A shared brace section must apply to every pair, station and end.
 def check_bracing(d):
     for key in (C.KEY_MP_CB_SPACING, C.KEY_MP_CB_NO_OF_CROSS_BRACINGS):
@@ -65,7 +70,7 @@ def check_capability(bridge):
     d = bridge.input_dict
     for key in (C.KEY_LL_IRC_CLASS_SV, C.KEY_BL_IRC_CLASS_SV, C.KEY_LL_IRC_70R_BOGIE, "loading.live_load.irc.class_b"):
         if key in d and d[key]:
-            refuse(key, d[key])
+            refuse_vehicle(key, d[key])
     if "temperature_load_kN_m2" in d and float(d["temperature_load_kN_m2"]):
         refuse("temperature_load_kN_m2", d["temperature_load_kN_m2"])
     if d[C.KEY_LL_CUSTOM_VEHICLES]:
