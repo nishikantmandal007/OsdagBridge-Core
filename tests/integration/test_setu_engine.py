@@ -473,3 +473,16 @@ def test_end_diaphragm_forces(setu_bridge):
     assert any(expected_summary(engine, pair, (0, last)) != expected_summary(engine, pair, range(1, last)) for pair in range(3)), \
         "end and intermediate stations carry identical forces, so this test could not catch them being mixed"
     assert engine.brace_values is run
+
+
+# The live-load report table is filled from setu's IRC vehicles and impact factors.
+def test_live_load_report_values(setu_bridge):
+    b = setu_bridge
+    span_m = float(b.input_dict[C.KEY_SPAN])
+    assert b.output_dict[C.KEY_LL_IMPACT_FACTOR_CLASS_A] == round(1 + 9 / (13.5 + span_m), 3)
+    assert b.output_dict[C.KEY_LL_IMPACT_FACTOR_CLASS_AA_70R] == 1.1
+    assert b.output_dict[C.KEY_LL_VEHICLE_TOTAL_LOAD_CLASS_A] == 543.47
+    assert b.output_dict[C.KEY_LL_VEHICLE_TOTAL_LOAD_70R_WHEELED] == 981.0
+    assert b.output_dict[C.KEY_LL_VEHICLE_TOTAL_LOAD_70R_TRACKED] == 686.7
+    assert b.output_dict[C.KEY_LL_VEHICLE_TOTAL_LOAD_FATIGUE] == 392.4
+
