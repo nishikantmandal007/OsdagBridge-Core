@@ -183,6 +183,17 @@ def test_site_mapping():
 
 @pytest.mark.parametrize("key,value", [
     (C.KEY_LL_IRC_CLASS_SV, True), (C.KEY_BL_IRC_CLASS_SV, True), (C.KEY_LL_IRC_70R_BOGIE, True), ("loading.live_load.irc.class_b", True),
+])
+# A vehicle neither engine analyses stops the run and says so, instead of pointing at ospgrillage.
+def test_vehicle_neither_engine_analyses(key, value):
+    b = prepared(supported_input())
+    b.input_dict[key] = value
+    with pytest.raises(ValueError, match="not analysed by either engine") as error:
+        check_capability(b)
+    assert key in str(error.value)
+
+
+@pytest.mark.parametrize("key,value", [
     (C.KEY_LL_IRC_CLASS_A, False), (C.KEY_LL_CUSTOM_VEHICLES, [{"name": "custom"}]),
     (C.KEY_MP_CB_TYPE + ".G2G3.B2M1", "K-Bracing"),
     (C.KEY_MP_ED_BRACING_TYPE + ".G1G2.E1M1", "K-Bracing"),
@@ -201,10 +212,10 @@ def test_capability(key, value):
     assert key in str(error.value)
 
 
-# The literal GUI defaults conflict with setu's unsupported-vehicle boundary.
+# The literal GUI defaults tick the Special Vehicle, which neither engine analyses.
 def test_literal_default_rejected():
     assert default_input()[C.KEY_ANALYSIS_ENGINE] == C.ENGINE_SETU
-    with pytest.raises(ValueError, match="ospgrillage analysis engine"):
+    with pytest.raises(ValueError, match="class_sv=True: this vehicle is not analysed by either engine"):
         check_capability(prepared(default_input()))
 
 
