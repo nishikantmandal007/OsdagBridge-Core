@@ -371,24 +371,24 @@ def test_independent_edge_uls(setu_bridge):
     assert actual == pytest.approx(expected, rel=0.15)
 
 
-# Minimal result data must refuse model-backed features explicitly.
-def test_phase_boundaries(setu_bridge):
+# Grillage-only records and attributes are refused by name; the results dataset and the tables built from it are setu's.
+def test_engine_boundaries(setu_bridge):
     engine = setu_bridge.grillage_model
-    assert engine._deduplicated_results is None
     data = engine.get_result_data()
     assert dict(data) == {"girders": {f"G{g + 1}": {} for g in range(4)}}
     for key in ("crossbracings", "forces", "nodes", "displacements", "loadcases", "members"):
-        with pytest.raises(NotImplementedError, match="setu engine phase 2/3"):
+        with pytest.raises(NotImplementedError, match="not provided by the setu engine"):
             data[key]
-        with pytest.raises(NotImplementedError, match="setu engine phase 2/3"):
+        with pytest.raises(NotImplementedError, match="not provided by the setu engine"):
             data.get(key)
-    for name in ("model", "dataset", "reactions", "get_element", "live_load_report_values"):
-        with pytest.raises(NotImplementedError, match="setu engine phase 2/3"):
+    for name in ("dataset", "reactions", "live_load_report_values", "vehicle_load_cases_list", "self_weight_load_case"):
+        with pytest.raises(NotImplementedError, match="not provided by the setu engine"):
             getattr(engine, name)
-    with pytest.raises(NotImplementedError, match="setu engine phase 2/3"):
-        setu_bridge.get_results_dataset()
-    with pytest.raises(NotImplementedError, match="setu engine phase 2/3"):
-        setu_bridge.compute_load_effects_cache()
+        assert not hasattr(engine, name)
+    assert engine.model.get_element(member="start_edge", options="elements") == []
+    assert setu_bridge.get_results_dataset() is engine._deduplicated_results
+    assert set(setu_bridge._load_effects_cache) == {"G1", "G2", "G3", "G4"}
+    assert setu_bridge._lc_summary and setu_bridge._reaction_summary
 
 
 # Both real engines run girder and deck design on the same supported input.
@@ -497,3 +497,75 @@ def test_live_load_report_values(setu_bridge):
     assert b.output_dict[C.KEY_LL_VEHICLE_TOTAL_LOAD_70R_TRACKED] == 686.7
     assert b.output_dict[C.KEY_LL_VEHICLE_TOTAL_LOAD_FATIGUE] == 392.4
 
+
+@pytest.fixture
+# The setu engine's skeleton back in the live OpenSees domain, which any other bridge built since has replaced.
+def setu_geometry(setu_bridge):
+    from osdagbridge_core.core.solvers.setu.plot_dataset import build_skeleton, node_lines
+    build_skeleton(node_lines(setu_bridge.grillage_model.diagrams, setu_bridge.get_edge_dist()))
+    return setu_bridge
+
+
+# OsdagBridge's girder name for setu girder k: the deck edges are lines EB1 and EB2 when the deck overhangs.
+def line_name(bridge, girder):
+    return f"G{girder + 2}" if bridge.get_edge_dist() > 0 else f"G{girder + 1}"
+
+
+# The plot dataset has ospgrillage's layout and load-case groups, and OsdagBridge finds setu's girders in it by itself.
+def test_plot_dataset_contract(setu_geometry, osp_bridge):
+    from osdagbridge_core.core.bridge_types.plate_girder.analysis_results import PlateGirderAnalysisResults
+    b = setu_geometry
+    ds, osp = b.get_results_dataset(), osp_bridge.get_results_dataset()
+    assert ds["forces"].dims == osp["forces"].dims and ds["displacements"].dims == osp["displacements"].dims
+    assert set(map(str, ds.Component.values)) <= set(map(str, osp.Component.values))
+    groups = b.get_result_handler().classify_loadcases()
+    assert groups["sw"] == ["SW"] and groups["dl_only"] == ["1.0 DL"]
+    assert groups["envelope_uls"] == ["Envelope ULS"] and groups["envelope_sls"] == ["Envelope SLS"]
+    assert "1.0 LL" in groups["vehicle_static"] and groups["uls_basic"] and groups["uls_seismic"] and groups["sls_rare"]
+    girders, _ = PlateGirderAnalysisResults(ds, b.grillage_model, edge_dist=b.get_edge_dist()).build_girders(verbose=False)
+    span_m = float(b.input_dict[C.KEY_SPAN])
+    assert list(girders) == ["EB1", "G2", "G3", "G4", "G5", "EB2"]
+    assert all(g["length"] == pytest.approx(span_m) for g in girders.values())
+
+
+# OsdagBridge's own readers give back setu's numbers: dead stage moments, live deflection, and each design moment where it governs.
+def test_plotted_values_are_setus(setu_geometry):
+    from setu.utils.constants import BASIC, BIGGER_IS_WORSE, MAX_MOMENT
+    b = setu_geometry
+    engine = b.grillage_model
+    handler = b.get_result_handler()
+    governing_girder, _ = engine.design_values.governing(MAX_MOMENT, BASIC, BIGGER_IS_WORSE)
+    for girder in range(4):
+        name = line_name(b, girder)
+        steel = engine.design_values.dead.stages["steel self weight"][girder]
+        plotted = handler._get_forces_df("SW", name, "Mz_i").iloc[:, 1].to_numpy()
+        assert plotted == pytest.approx(steel.composite_moment_kn_m[:-1], abs=1e-3)
+        live_mm = handler._get_displacements_df("1.0 LL", name, "dy")["dy"].to_numpy()
+        assert live_mm == pytest.approx(1000 * engine.diagrams.live[governing_girder, MAX_MOMENT, BIGGER_IS_WORSE][girder].deflection_m, abs=1e-6)
+        design = engine.design_values.girders[girder][MAX_MOMENT][BASIC][BIGGER_IS_WORSE]
+        envelope = handler._get_forces_df("Envelope ULS", name, "Mz_i").iloc[:, 1].to_numpy()
+        station = list(steel.stations_m).index(design.at_m)
+        assert envelope[station] == pytest.approx(design.value, rel=1e-6)
+    left, right = b._reaction_summary["SW"]["left_kN"], b._reaction_summary["SW"]["right_kN"]
+    assert left < 0 < right, "reactions keep ospgrillage's signs: left as Vy_i, right as -Vy_j"
+
+
+# Every OsdagBridge figure, the graph engine and the report's figures draw from the setu dataset.
+def test_figures_render(setu_geometry):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from osdagbridge_core.core.bridge_types.plate_girder.plot_generator import capture_report_figures
+    b = setu_geometry
+    ds = b.get_results_dataset()
+    envelope = ds.sel(Loadcase="Envelope ULS")
+    for build, key in ((b.build_figure_bmd, "Mz"), (b.build_figure_sfd, "Fy"), (b.build_figure_deflection, "Dy")):
+        build(envelope, key)
+    b.build_figure_grillage()
+    nodes, members = b.get_nodes_members()
+    assert set(capture_report_figures(ds, nodes, members, edge_dist=b.get_edge_dist())) == {"bm_envelope", "sf_envelope", "defl_ll"}
+    figure = plt.figure()
+    engine = b.build_graph_engine(figure, *[figure.add_subplot(4, 1, k + 1) for k in range(4)])
+    for key in engine.get_girder_keys():
+        assert engine.extract_member_results(key, "1.0 LL") is not None
+    plt.close("all")
