@@ -2493,6 +2493,8 @@ class PlateGirderBridge:
         """
         from osdagbridge_core.core.bridge_types.plate_girder.crossbracingforces import CrossBracingForces
 
+        if self.input_dict[KEY_ANALYSIS_ENGINE] == ENGINE_SETU:
+            from osdagbridge_core.core.solvers.setu.bracing_forces import SetuCrossBracingForces as CrossBracingForces
         cb = CrossBracingForces(bridge=self)
         return cb.design()
 
@@ -2508,6 +2510,8 @@ class PlateGirderBridge:
         """
         from osdagbridge_core.core.bridge_types.plate_girder.crossbracingforces import EndDiaphragmForces
 
+        if self.input_dict[KEY_ANALYSIS_ENGINE] == ENGINE_SETU:
+            from osdagbridge_core.core.solvers.setu.bracing_forces import SetuEndDiaphragmForces as EndDiaphragmForces
         ed_forces = EndDiaphragmForces(bridge=self, pair_to_elements={})
         return ed_forces.design()
 
