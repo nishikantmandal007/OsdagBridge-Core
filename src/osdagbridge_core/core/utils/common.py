@@ -14,6 +14,10 @@ GPa = kilo * MPa
 kPa = kilo * Pa
 g = 9.81
 
+KEY_ANALYSIS_ENGINE = "analysis.engine"
+ENGINE_SETU = "setu"
+ENGINE_OSPGRILLAGE = "ospgrillage"
+
 # ========== Type of Fields Start ==========================================================
 TYPE_MODULE = "module"
 TYPE_TITLE = "title"

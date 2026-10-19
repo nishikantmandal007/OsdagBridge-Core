@@ -37,7 +37,7 @@ from .plot_generator import (
 )
 from osdagbridge_core.core.utils.codes.irc6_2017 import IRC6_2017
 from osdagbridge_core.core.utils.common import (
-    KEY_STRUCTURE_TYPE,
+    KEY_STRUCTURE_TYPE, KEY_ANALYSIS_ENGINE, ENGINE_SETU,
     KEY_PROJECT_LOCATION,
     KEY_SPAN,
     KEY_CARRIAGEWAY_WIDTH,
@@ -726,31 +726,36 @@ class PlateGirderBridge:
             # Stage 2: Bridge Layout Solving
             self._run_stage("2", self._solve_bridge_layout)
             
-            # Stage 3: Grillage Setup
-            self._run_stage("3", self._stage_grillage_setup)
+            from osdagbridge_core.core.utils.common import KEY_ANALYSIS_ENGINE, ENGINE_SETU
+            if self.input_dict[KEY_ANALYSIS_ENGINE] == ENGINE_SETU:
+                from osdagbridge_core.core.solvers.setu.analysis_engine import run_analysis
+                run_analysis(self)
+            else:
+                # Stage 3: Grillage Setup
+                self._run_stage("3", self._stage_grillage_setup)
             
-            # Stage 4A: Dead Load Application
-            self._run_stage("4A", self.add_dead_loads)
+                # Stage 4A: Dead Load Application
+                self._run_stage("4A", self.add_dead_loads)
             
-            # Stage 4B: Live Load Application
-            self._run_stage("4B", self.add_live_loads)
+                # Stage 4B: Live Load Application
+                self._run_stage("4B", self.add_live_loads)
             
-            # Stage 4C: Wind Load Application
-            self._run_stage("4C", self.add_wind_loads)
+                # Stage 4C: Wind Load Application
+                self._run_stage("4C", self.add_wind_loads)
             
-            # Stage 4D: Temperature Load Application
-            self._run_stage("4D", self.add_temperature_load)
+                # Stage 4D: Temperature Load Application
+                self._run_stage("4D", self.add_temperature_load)
             
-            # Stage 4E: Seismic Load Application
-            self._run_stage("4E", self.add_seismic_loads)
+                # Stage 4E: Seismic Load Application
+                self._run_stage("4E", self.add_seismic_loads)
             
-            # Stage 4F: Load Combination Envelope
-            self._run_stage("4F", self._stage_load_combinations)
+                # Stage 4F: Load Combination Envelope
+                self._run_stage("4F", self._stage_load_combinations)
             
-            # Stage 4G: Structural Analysis
-            dataset = self._run_stage("4G", self._reanalyze_with_dedup)
-            dataset = self.create_envelope_load_case(dataset)
-            dataset = self._drop_moving_increment_cases(dataset)
+                # Stage 4G: Structural Analysis
+                dataset = self._run_stage("4G", self._reanalyze_with_dedup)
+                dataset = self.create_envelope_load_case(dataset)
+                dataset = self._drop_moving_increment_cases(dataset)
 
             # Drop the raw ospgrillage per-load-case records as soon as the
             # deduplicated dataset is cached: everything downstream (design checks,
@@ -2458,10 +2463,14 @@ class PlateGirderBridge:
         # Forces, displacements, load-case names and girders all come from
         # self.result_data (built just before stage 5), so no result handler is
         # needed here — run_design_check reads that dict directly.
-        _, engine, design_results = run_design_check(
-            plate_girder_bridge=self,
-            print_report=True,
-        )
+        if self.input_dict[KEY_ANALYSIS_ENGINE] == ENGINE_SETU:
+            model = self.grillage_model
+            _, engine, design_results = run_design_check(self, model.per_girder_demands, model.per_girder_per_lc, model.deflections_cache)
+        else:
+            _, engine, design_results = run_design_check(
+                plate_girder_bridge=self,
+                print_report=True,
+            )
         self._dcr_engine = engine
         bridge_logger.check_cancel()
         self.design_results = design_results

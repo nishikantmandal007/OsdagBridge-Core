@@ -3054,8 +3054,8 @@ def _extract_demands_from_result_data(
                 return 0.0
             try:
                 lc_rows = [result_data["forces"][str(lc_name)][str(e)] for e in elements]
-                vi = max(_num(r.get(comp_i)) for r in lc_rows)
-                vj = max(_num(r.get(comp_j)) for r in lc_rows)
+                vi = max(abs(_num(r.get(comp_i))) for r in lc_rows)
+                vj = max(abs(_num(r.get(comp_j))) for r in lc_rows)
                 return max(abs(vi), abs(vj))
             except Exception:
                 return 0.0
@@ -3150,8 +3150,8 @@ def _extract_demands_from_result_data(
             try:
                 lc_rows = [result_data["forces"][lc_str][str(e)] for e in elements]
                 def _fmax(comp_i, comp_j):
-                    vi = max(_num(r.get(comp_i)) for r in lc_rows)
-                    vj = max(_num(r.get(comp_j)) for r in lc_rows)
+                    vi = max(abs(_num(r.get(comp_i))) for r in lc_rows)
+                    vj = max(abs(_num(r.get(comp_j))) for r in lc_rows)
                     return max(abs(vi), abs(vj))
                 Mz = _fmax("Mz_i", "Mz_j") / 1e3   # N·m → kN·m
                 Vy = _fmax("Vy_i", "Vy_j") / 1e3   # N → kN
