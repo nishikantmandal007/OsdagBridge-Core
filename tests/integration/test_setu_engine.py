@@ -46,16 +46,17 @@ def record_stages(b):
 
 
 @pytest.fixture(scope="module")
-# Run both design stages through the real public API once.
+# Run the whole design, Osdag member design and CAD included, through one setu analysis.
 def setu_bridge():
     b = PlateGirderBridge()
     b.set_input(supported_input())
     completed = record_stages(b)
-    with patch("setu.girder_design_values", wraps=__import__("setu").girder_design_values) as solve:
-        with pytest.raises(NotImplementedError, match="setu engine phase 2/3"):
-            b.design()
+    setu = __import__("setu")
+    with patch("setu.bridge_design_values", wraps=setu.bridge_design_values) as solve:
+        b.design()
     assert solve.call_count == 1
-    assert completed == ["1", "2", "5", "6"]
+    assert completed == ["1", "2", "5", "6", "7", "8"]
+    assert set(b.crossbracing_design_results) == set(b.end_diaphragm_design_results) == {"G1-G2", "G2-G3", "G3-G4"}
     assert b.design_results["per_girder"] and b.deck_design_results
     print(f"SETU_ANALYSIS_SECONDS={b.grillage_model.analysis_seconds:.6f}")
     assert b.grillage_model.analysis_seconds <= 300, "Time the 0.25 m mesh and stop for the reviewer"
@@ -420,3 +421,55 @@ def test_dcr_hook(engine):
     else:
         check.assert_called_once_with(plate_girder_bridge=b, print_report=True)
     assert b._dcr_engine == "dcr" and b.design_results == {"result": 1}
+
+
+# Every governing ULS axial force of these roles, written out independently of the adapter.
+def expected_forces(engine, pair, stations, roles):
+    states = ["ultimate, basic"] + (["ultimate, seismic"] if engine.seismic is not None else [])
+    return [value for (k, station, role), by_state in engine.brace_values.members.items()
+            if k == pair and station in stations and role in roles for state in states for value in by_state[state].values()]
+
+
+# The pair summary OsdagBridge expects, built from the expected forces with its own 5 N cut-off and rounding.
+def expected_summary(engine, pair, stations):
+    from osdagbridge_core.core.solvers.setu.bracing_forces import CHORDS, DIAGONALS
+    summary = {}
+    for prefix, roles in (("diag", DIAGONALS), ("chord", CHORDS)):
+        forces = expected_forces(engine, pair, stations, roles)
+        assert forces, f"pair {pair} has no {prefix} members at stations {list(stations)}"
+        tension = max(forces, key=lambda force: force.value)
+        compression = min(forces, key=lambda force: force.value)
+        summary[f"{prefix}_tension_kN"] = round(tension.value, 3) if tension.value > 0.005 else None
+        summary[f"{prefix}_tension_gov_lc"] = tension.combination if tension.value > 0.005 else None
+        summary[f"{prefix}_compression_kN"] = round(-compression.value, 3) if compression.value < -0.005 else None
+        summary[f"{prefix}_compression_gov_lc"] = compression.combination if compression.value < -0.005 else None
+    return summary
+
+
+# Intermediate cross-bracing reads only the stations between the supports, with setu's member forces as they are.
+def test_cross_bracing_forces(setu_bridge):
+    from osdagbridge_core.core.solvers.setu.bracing_forces import SetuCrossBracingForces
+    engine = setu_bridge.grillage_model
+    last = engine.bridge_input.bracing.station_count - 1
+    forces = SetuCrossBracingForces(setu_bridge).get_design_forces_dict()
+    assert list(forces["pairs"]) == ["G1-G2", "G2-G3", "G3-G4"]
+    assert set(forces) == {"brace_type", "top_chord", "bottom_chord", "geometry", "pairs"}
+    for pair, summary in enumerate(forces["pairs"].values()):
+        assert summary == expected_summary(engine, pair, range(1, last))
+        member_forces = {round(abs(force.value), 3) for force in expected_forces(engine, pair, range(1, last), ("diagonal_down", "diagonal_up"))}
+        assert summary["diag_tension_kN"] in member_forces and summary["diag_compression_kN"] in member_forces
+    assert SetuCrossBracingForces(setu_bridge).get_crossbracing_count() == (last - 1) * 3
+
+
+# End diaphragms read only the two support lines, use the engine's one analysis, and leave the engine as they found it.
+def test_end_diaphragm_forces(setu_bridge):
+    from osdagbridge_core.core.solvers.setu.bracing_forces import SetuEndDiaphragmForces
+    engine = setu_bridge.grillage_model
+    last = engine.bridge_input.bracing.station_count - 1
+    end = SetuEndDiaphragmForces(setu_bridge, pair_to_elements={})
+    run = engine.brace_values
+    for pair in range(3):
+        assert end.get_pair_forces(f"G{pair + 1}-G{pair + 2}", cos_alpha=0.5) == expected_summary(engine, pair, (0, last))
+    assert any(expected_summary(engine, pair, (0, last)) != expected_summary(engine, pair, range(1, last)) for pair in range(3)), \
+        "end and intermediate stations carry identical forces, so this test could not catch them being mixed"
+    assert engine.brace_values is run
