@@ -421,6 +421,7 @@ class PlateGirderBridge:
             The flat dictionary built and maintained by ``CustomWindow``.
         """
         self.input_dict = self._normalize_input_dict(input_dict)
+        self.input_dict.setdefault(KEY_ANALYSIS_ENGINE, ENGINE_SETU)  # .osi files saved before the engine choice
         self.basic_inputs = {
             k: v for k, v in self.input_dict.items()
             if k in self._BASIC_INPUT_KEYS
@@ -734,7 +735,7 @@ class PlateGirderBridge:
             from osdagbridge_core.core.utils.common import KEY_ANALYSIS_ENGINE, ENGINE_SETU
             if self.input_dict[KEY_ANALYSIS_ENGINE] == ENGINE_SETU:
                 from osdagbridge_core.core.solvers.setu.analysis_engine import run_analysis
-                run_analysis(self)
+                self._run_stage("4G", run_analysis, self)
             else:
                 # Stage 3: Grillage Setup
                 self._run_stage("3", self._stage_grillage_setup)
@@ -3235,6 +3236,9 @@ class PlateGirderBridge:
             g_data = per_girder.get(g_name, {})
             per_lc = g_data.get("per_lc", {})
             lc_demand = per_lc.get(load_case)
+            # setu's plots name their load states differently from its combinations.
+            if not lc_demand and hasattr(self.grillage_model, "case_demand"):
+                lc_demand = self.grillage_model.case_demand(g_name, load_case)
             if not lc_demand:
                 continue
 

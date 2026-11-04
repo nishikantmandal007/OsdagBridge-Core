@@ -1257,6 +1257,33 @@ DESIGN_OPTIONS_SCHEMA = {
     },
     "sections": [
 
+        # ──────────────── Analysis Engine + Description ────────────────
+        {
+            "column": 0,
+            "title":  "Analysis Engine",
+            "rows": [
+                {
+                    "fields": [{
+                        "id":      KEY_ANALYSIS_ENGINE,
+                        "label":   "Engine",
+                        "type":    TYPE_COMBOBOX,
+                        "choices": [ENGINE_SETU, ENGINE_OSPGRILLAGE],
+                        "on_change": "on_analysis_engine_changed",
+                    }]
+                },
+            ],
+        },
+        {
+            "column": 1,
+            "type":   TYPE_DESCRIPTION,
+            "title":  "Analysis Engine",
+            "text":   (
+                "Selects the solver that produces the analysis results used for design, reports and plots.\n\n"
+                "setu always searches Class A, Class AA and Class 70R (Wheeled, Tracked) and does not analyse "
+                "Class SV or Class 70R Bogie, so those Live Load boxes are set and locked while it is selected."
+            ),
+        },
+
         # ──────────────── Column 0: Construction Stages ────────────────
         {
             "column": 0,
