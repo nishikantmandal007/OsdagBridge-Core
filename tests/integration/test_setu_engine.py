@@ -634,10 +634,11 @@ def test_live_load_report_values(setu_bridge):
     span_m = float(b.input_dict[C.KEY_SPAN])
     assert b.output_dict[C.KEY_LL_IMPACT_FACTOR_CLASS_A] == round(1 + 9 / (13.5 + span_m), 3)
     assert b.output_dict[C.KEY_LL_IMPACT_FACTOR_CLASS_AA_70R] == 1.1
-    assert b.output_dict[C.KEY_LL_VEHICLE_TOTAL_LOAD_CLASS_A] == 543.47
-    assert b.output_dict[C.KEY_LL_VEHICLE_TOTAL_LOAD_70R_WHEELED] == 981.0
-    assert b.output_dict[C.KEY_LL_VEHICLE_TOTAL_LOAD_70R_TRACKED] == 686.7
-    assert b.output_dict[C.KEY_LL_VEHICLE_TOTAL_LOAD_FATIGUE] == 392.4
+    # IRC:6-2017 Amendment 10 (and Amendment 8 for the fatigue truck) print these in kN
+    assert b.output_dict[C.KEY_LL_VEHICLE_TOTAL_LOAD_CLASS_A] == 554.0
+    assert b.output_dict[C.KEY_LL_VEHICLE_TOTAL_LOAD_70R_WHEELED] == 1000.0
+    assert b.output_dict[C.KEY_LL_VEHICLE_TOTAL_LOAD_70R_TRACKED] == 700.0
+    assert b.output_dict[C.KEY_LL_VEHICLE_TOTAL_LOAD_FATIGUE] == 400.0
 
 
 @pytest.fixture
