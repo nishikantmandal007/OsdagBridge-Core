@@ -17,7 +17,7 @@ maintainers = [
   {name = "Garvit Singh Rathore"}
 ]
 
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.12,<3.13"
 
 keywords = [
   "bridge",
@@ -57,6 +57,8 @@ dependencies = [
   "opsvis>=1.0",
   "ifcopenshell",
   "plotly",
+  "setu @ git+https://github.com/nishikantmandal007/setu.git@main",
+  "osdag-core @ git+https://github.com/osdag-admin/osdag-core.git@main",
 ]
 
 [project.optional-dependencies]
