@@ -102,6 +102,10 @@ def run_calculation(design_dict: Dict[str, Any], quiet: bool = True) -> Dict[str
 _forkserver_preloaded = False
 
 
+# Bracing member designs at once, on any machine: every worker is a whole process.
+DESIGN_WORKER_LIMIT = 4
+
+
 def design_pool(max_workers: int) -> ProcessPoolExecutor:
     """Executor for osdag_core design checks with a thread-safe start method.
 
@@ -125,7 +129,7 @@ def design_pool(max_workers: int) -> ProcessPoolExecutor:
             _forkserver_preloaded = True
     except ValueError:
         ctx = multiprocessing.get_context("spawn")
-    return ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx)
+    return ProcessPoolExecutor(max_workers=min(max_workers, DESIGN_WORKER_LIMIT), mp_context=ctx)
 
 
 def run_parallel_designs(design_dicts: List[Dict[str, Any]], quiet: bool = True) -> List[Dict[str, Any]]:

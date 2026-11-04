@@ -2,6 +2,7 @@
 import ctypes
 import gc
 import os
+import sys
 import types
 
 
@@ -14,8 +15,12 @@ def _dbg(msg):
 def _malloc_trim():
     # Return free glibc heap arenas to the OS. gc.collect() frees objects into the
     # allocator's arena but does NOT hand memory back to the OS — this does.
-    # Best-effort: no-op on non-glibc platforms.
+    # Best-effort: no-op on other non-glibc platforms.
     try:
+        if sys.platform == "darwin":
+            from osdagbridge_core.core.utils import macos_memory
+            macos_memory.release()
+            return
         import ctypes
         ctypes.CDLL("libc.so.6").malloc_trim(0)
     except Exception:
@@ -26,6 +31,9 @@ def proc_mem_mb():
     # Current process (RSS, VIRT) in MB from /proc/self/status; (None, None) if unavailable.
     rss = virt = None
     try:
+        if sys.platform == "darwin":
+            from osdagbridge_core.core.utils import macos_memory
+            return macos_memory.process_mb()
         with open("/proc/self/status") as f:
             for line in f:
                 if line.startswith("VmRSS:"):
@@ -204,6 +212,7 @@ _BRIDGE_RESULT_ATTRS = (
     # (~20 MB, tracemalloc: xarray duck_array_ops) alive on the post-release floor even
     # though grillage_model itself was replaced. Recomputed every design — safe to drop.
     "result_envelopes",
+    "_results_with_envelope",
 )
 
 # Raw per-load-case record containers on the ospgrillage Results object.

@@ -96,7 +96,14 @@ def build_skeleton(lines):
 def girder_end_forces(forces):
     moment = N_PER_KN * forces.composite_moment_kn_m
     shear = N_PER_KN * forces.shear_kn
-    return {"Mz_i": moment[:-1], "Mz_j": -moment[1:], "Vy_i": shear[:-1], "Vy_j": -shear[1:]}
+    torsion = N_PER_KN * forces.torsion_kn_m
+    axial = N_PER_KN * forces.axial_kn
+    end_forces = {"Mz_i": moment[:-1], "Mz_j": -moment[1:], "Vy_i": shear[:-1], "Vy_j": -shear[1:], "Mx_i": torsion[:-1], "Mx_j": -torsion[1:],
+                  "Vx_i": axial[:-1], "Vx_j": -axial[1:]}
+    if forces.weak_axis_shear_kn is not None:
+        weak_shear, weak_moment = N_PER_KN * forces.weak_axis_shear_kn, N_PER_KN * forces.weak_axis_moment_kn_m
+        end_forces.update({"Vz_i": weak_shear[:-1], "Vz_j": -weak_shear[1:], "My_i": weak_moment[:-1], "My_j": -weak_moment[1:]})
+    return end_forces
 
 
 # Forces and displacements of every load state on the skeleton, in ospgrillage's dataset layout; edge lines carry none.
@@ -114,10 +121,32 @@ def states_dataset(states, lines, first_girder_line):
             line = first_girder_line + girder
             for component, values in girder_end_forces(girder_forces).items():
                 forces[case, line * panels:(line + 1) * panels, components.index(component)] = values
+            if girder_forces.displacements_m is not None:
+                for column, component in enumerate(DISPLACEMENT_COMPONENTS):
+                    displacements[case, line::len(lines), components.index(component)] = girder_forces.displacements_m[:, column]
             displacements[case, line::len(lines), vertical] = girder_forces.deflection_m
     coords = {"Loadcase": list(states), "Element": elements, "Node": nodes, "Component": components}
     return xr.Dataset({"forces": (("Loadcase", "Element", "Component"), forces),
                        "displacements": (("Loadcase", "Node", "Component"), displacements)}, coords=coords)
+
+
+# Each skeleton element's end nodes, in the live domain the plot readers walk.
+def member_nodes(dataset):
+    return {str(element): [int(node) for node in ops.eleNodes(int(element))] for element in dataset["Element"].values.tolist()}
+
+
+# A load case's element-end forces as the load arrows read them, built when a case is asked for.
+class CaseForces:
+    def __init__(self, dataset):
+        self.dataset = dataset
+
+    def get(self, load_case, default=None):
+        if load_case not in self.dataset["Loadcase"].values:
+            return default
+        forces = self.dataset["forces"].sel(Loadcase=load_case).fillna(0.0)
+        names = [str(component) for component in forces["Component"].values]
+        elements = forces["Element"].values.tolist()
+        return {str(element): dict(zip(names, row)) for element, row in zip(elements, forces.transpose("Element", "Component").values.tolist())}
 
 
 # The ULS and SLS envelopes added as load cases: per element, node and component, the worst signed magnitude.

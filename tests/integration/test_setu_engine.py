@@ -1,3 +1,4 @@
+import gc
 import math
 from dataclasses import asdict, fields
 from unittest.mock import patch
@@ -13,10 +14,10 @@ from osdagbridge_core.core.bridge_types.plate_girder.designer import (
     BridgeConfig, DemandEnvelope, _extract_demands_from_result_data, apply_camber_to_deflections_cache)
 from osdagbridge_core.core.bridge_types.plate_girder.results_data import build_deflections_cache
 from osdagbridge_core.core.solvers.setu.analysis_engine import SetuAnalysisEngine
-from osdagbridge_core.core.solvers.setu.unsupported_inputs import check_capability
+from osdagbridge_core.core.solvers.setu.unsupported_inputs import check_capability, simplifications
 from osdagbridge_core.core.solvers.setu.girder_demands import girder_demands, raw_deflections
 from osdagbridge_core.core.solvers.setu.bridge_input import (
-    added_dead_loads, brace_value, bridge_input, cross_section, seismic_site, temperature_site, wind_site)
+    added_dead_loads, brace_value, bracing, bridge_input, cross_section, estimated_peak_gb, normalise_gui_bracing, workers_that_fit, reconcile_layout, seismic_site, temperature_site, wind_site)
 
 
 # Prepare the GUI inputs without building a structural model.
@@ -51,11 +52,11 @@ def setu_bridge():
     b = PlateGirderBridge()
     b.set_input(supported_input())
     completed = record_stages(b)
-    setu = __import__("setu")
-    with patch("setu.bridge_design_values", wraps=setu.bridge_design_values) as solve:
+    from osdagbridge_core.core.solvers.setu import analysis_engine
+    with patch.object(analysis_engine, "solve_in_own_process", wraps=analysis_engine.solve_in_own_process) as solve:
         b.design()
     assert solve.call_count == 1
-    assert completed == ["1", "2", "5", "6", "7", "8"]
+    assert completed == ["1", "2", "4G", "5", "6", "7", "8"]
     assert set(b.crossbracing_design_results) == set(b.end_diaphragm_design_results) == {"G1-G2", "G2-G3", "G3-G4"}
     assert b.design_results["per_girder"] and b.deck_design_results
     print(f"SETU_ANALYSIS_SECONDS={b.grillage_model.analysis_seconds:.6f}")
@@ -193,17 +194,31 @@ def test_vehicle_neither_engine_analyses(key, value):
     assert key in str(error.value)
 
 
-@pytest.mark.parametrize("key,value", [
-    (C.KEY_LL_IRC_CLASS_A, False), (C.KEY_LL_CUSTOM_VEHICLES, [{"name": "custom"}]),
-    (C.KEY_MP_CB_TYPE + ".G2G3.B2M1", "K-Bracing"),
-    (C.KEY_MP_ED_BRACING_TYPE + ".G1G2.E1M1", "K-Bracing"),
-    (C.KEY_MP_ED_TYPE + ".G1G2.E1M1", "Rolled Beam"),
-    (C.KEY_MP_CB_SPACING + ".G2G3.B2M1", 5.0),
-    ("temperature_load_kN_m2", 1.5),
-    (C.KEY_SC_RIGHT_SUPPORT, "Fixed"), (C.KEY_PL_SELF_WEIGHT_FACTOR, 1.2),
-    (C.KEY_MP_GD_SEGMENT_TABLE + ".G1", [{"start": 0, "end": 10}, {"start": 10, "end": 35}]),
+# Inputs ospgrillage's analysis also ignores: the run goes ahead, and setu says what it did not follow.
+@pytest.mark.parametrize("key,value,says", [
+    (C.KEY_LL_CUSTOM_VEHICLES, [{"name": "custom"}], "Custom vehicles"),
+    (C.KEY_LL_FOOTPATH_PRESSURE_MODE, "Custom", "footpath pressure"),
+    (C.KEY_PL_SELF_WEIGHT_FACTOR, 1.2, "self-weight factor"),
+    (C.KEY_WL_SITE_TOPOGRAPHY, "Hill, ridge, escarpment or cliff", "Topography"),
+    (C.KEY_WL_WIND_LL_ECC_MODE, "Custom", "eccentricity"),
+    (C.KEY_MP_CB_TYPE + ".G2G3.B2M1", "K-Bracing", "G1-G2 bracing"),
+    (C.KEY_MP_CB_BRACING_SECTION_DESIGNATION + ".G2G3.B2M1", "IS 110 x 110 x 10", "G1-G2 bracing"),
+    (C.KEY_MP_ED_BRACING_TYPE + ".G1G2.E1M1", "K-Bracing", "End diaphragms"),
+    (C.KEY_MP_ED_TYPE + ".G1G2.E1M1", "Rolled Beam", "Beam end diaphragms"),
+    (C.KEY_MP_CB_SPACING + ".G2G3.B2M1", 5.0, "equal spacing"),
+    (C.KEY_MATERIAL_CROSS_BRACING_E, 210, "girder steel"),
+    (C.KEY_MP_GD_SEGMENT_TABLE + ".G1", [{"start": 0, "end": 10}, {"start": 10, "end": 35}], "segments"),
 ])
-# Unsupported selections must fail instead of switching engines or dropping a load.
+def test_simplification_is_stated(key, value, says):
+    b = prepared(supported_input())
+    assert simplifications(b) == []
+    b.input_dict[key] = value
+    check_capability(b)
+    assert any(says in note for note in simplifications(b))
+
+
+# What setu cannot run at all still stops, naming the input.
+@pytest.mark.parametrize("key,value", [(C.KEY_LL_IRC_CLASS_A, False), (C.KEY_SC_RIGHT_SUPPORT, "Fixed"), ("temperature_load_kN_m2", 1.5)])
 def test_capability(key, value):
     b = prepared(supported_input())
     b.input_dict[key] = value
@@ -212,11 +227,137 @@ def test_capability(key, value):
     assert key in str(error.value)
 
 
-# The literal GUI defaults tick the Special Vehicle, which neither engine analyses.
-def test_literal_default_rejected():
+# The GUI defaults run on setu as they are: it is the default engine and they leave out what it refuses.
+def test_literal_default_accepted():
     assert default_input()[C.KEY_ANALYSIS_ENGINE] == C.ENGINE_SETU
-    with pytest.raises(ValueError, match="class_sv=True: this vehicle is not analysed by either engine"):
-        check_capability(prepared(default_input()))
+    check_capability(prepared(default_input()))
+
+
+# ospgrillage keeps its defaults ticked.
+def test_defaults_follow_engine():
+    from osdagbridge_core.core.bridge_types.plate_girder.defaults import _update_loading_tab_defaults
+    d = {C.KEY_ANALYSIS_ENGINE: C.ENGINE_OSPGRILLAGE}
+    _update_loading_tab_defaults(d)
+    assert all(d[key] for key in C.SETU_UNSUPPORTED_VEHICLES)
+
+
+# The database's rounded shear modulus is not an independent one; a really different value still is.
+def test_shear_modulus_rounding():
+    b = prepared(supported_input())
+    b.input_dict[C.KEY_MATERIAL_GIRDER_G] = 76.9
+    assert simplifications(b) == []
+    b.input_dict[C.KEY_MATERIAL_GIRDER_G] = 80.0
+    assert any("Shear modulus" in note for note in simplifications(b))
+
+
+# Without a footpath there is no railing strip, so its load must not reach setu.
+def test_no_footpath_no_railing_load():
+    d = supported_input()
+    d[C.KEY_TS_NO_OF_FOOTPATHS] = 0
+    assert added_dead_loads(d).railing_kn_per_m == 0
+
+
+# A railing width changed after the layout solve moves the deck edge, not the girders.
+def test_layout_follows_strips():
+    d = supported_input()
+    d[C.KEY_TS_NO_OF_FOOTPATHS], d[C.KEY_TS_FOOTPATH_WIDTH], d[C.KEY_RL_WIDTH] = 2, 1.5, 0.275
+    spacing = d[C.KEY_TS_GIRDER_SPACING]
+    reconcile_layout(d)
+    assert d[C.KEY_TS_OVERALL_WIDTH] == cross_section(d).total_width_m()
+    assert d[C.KEY_TS_GIRDER_SPACING] == spacing
+    assert d[C.KEY_TS_DECK_OVERHANG] * 2 + spacing * (d[C.KEY_TS_NO_OF_GIRDERS] - 1) == pytest.approx(d[C.KEY_TS_OVERALL_WIDTH])
+
+
+# The influence surfaces do not outlive the run, and the results that came from them do.
+def test_surfaces_dropped(setu_bridge):
+    engine = setu_bridge.grillage_model
+    assert engine.design_values.surfaces == engine.design_values.place_surfaces == engine.brace_values.surfaces == {}
+    assert engine.brace_values.members
+    from setu.analysis.influence_surface import InfluenceSurface
+    gc.collect()
+    assert not [o for o in gc.get_objects() if isinstance(o, InfluenceSurface)]
+
+
+# The report's wind and seismic forces, and the design bars for a dropdown load case, match ospgrillage's feature set.
+def test_report_forces_and_case_bars(setu_bridge):
+    for key in (C.KEY_WL_TRANSVERSE_WIND_FORCE, C.KEY_WL_LONGITUDINAL_WIND_FORCE, C.KEY_WL_VERTICAL_WIND_FORCE, C.KEY_SL_FORCE_LONGITUDINAL, C.KEY_SL_FORCE_TRANSVERSE):
+        assert setu_bridge.output_dict[key] > 0
+    assert setu_bridge.output_dict[C.KEY_SL_FORCE_TRANSVERSE] > setu_bridge.output_dict[C.KEY_SL_FORCE_LONGITUDINAL]
+    for load_case in setu_bridge.get_available_loadcases():
+        assert setu_bridge.get_dcr_for_selection("G1", load_case), load_case
+    uls = setu_bridge.grillage_model.case_demand("G1", "Envelope ULS")
+    assert uls["lc_type"] == "ULS" and uls["Mu_kNm"] == pytest.approx(setu_bridge.grillage_model.per_girder_demands["G1"].Mu_kNm, rel=1e-3)
+
+
+# Bracing design never takes a process per core.
+def test_design_pool_capped():
+    from osdagbridge_core.core.utils import connect
+    with connect.design_pool(64) as pool:
+        assert pool._max_workers == connect.DESIGN_WORKER_LIMIT
+
+
+# Peak memory grows much faster than the deck is widened.
+def test_peak_estimate_grows_with_width():
+    narrow, wide = supported_input(), supported_input()
+    wide[C.KEY_CARRIAGEWAY_WIDTH], wide[C.KEY_TS_NO_OF_GIRDERS] = 46.0, 22
+    assert estimated_peak_gb(wide)[1] > 2 * estimated_peak_gb(narrow)[1]
+
+
+# Workers fit the free memory, up to the cap and never below one.
+@pytest.mark.parametrize("available,workers", [(None, 4), (20.0, 4), (4.0, 2), (2.5, 1), (0.5, 1)])
+def test_workers_that_fit(available, workers):
+    assert workers_that_fit(4, 2.0, available) == workers
+
+
+# Channel and single angle sections give the database area, doubled for double sections.
+@pytest.mark.parametrize("section,designation,area_cm2", [
+    ("Channel", "MC 100", 12.1), ("Double Channel", "MC 100", 24.2), ("Angle", "100 x 100 x 10", 19.1), ("Double Angle (Short Leg)", "100 x 100 x 10", 38.2)])
+def test_bracing_section_area(section, designation, area_cm2):
+    d = supported_input()
+    d[C.KEY_MP_CB_BRACING_SECTION_TYPE + ".G1G2.B1M1"] = section
+    d[C.KEY_MP_CB_BRACING_SECTION_DESIGNATION + ".G1G2.B1M1"] = designation
+    assert bracing(d).area_m2 == pytest.approx(area_cm2 * 1e-4)
+
+
+# The peak location is the node of the largest magnitude, first one on a tie.
+def test_peak_location():
+    import xarray as xr
+    from osdagbridge_core.core.bridge_types.plate_girder.results_data import _peak_location
+    values = np.array([[[1000.0, -5000.0], [5000.0, 2000.0]]])
+    ds = xr.Dataset({"forces": (("Loadcase", "Element", "Component"), values)},
+                    coords={"Loadcase": ["c"], "Element": [1, 2], "Component": ["Mz_i", "Mz_j"]})
+    coords = {1: (0.0,), 2: (1.5,), 3: (3.0,)}
+    assert _peak_location(ds, "c", [(1, 1, 2), (2, 2, 3)], "Mz", coords) == 1.5
+    assert _peak_location(ds, "c", [(9, 1, 2)], "Mz", coords) is None
+
+
+# A required vehicle left unticked says to tick it.
+def test_required_vehicle_message():
+    b = prepared(supported_input())
+    b.input_dict[C.KEY_LL_IRC_70R_TRACKED] = False
+    with pytest.raises(ValueError, match="70r_tracked is unticked: setu always searches this IRC vehicle, so tick it"):
+        check_capability(b)
+
+
+# The Additional Inputs dropdown offers both engines under the key the backend branches on.
+def test_engine_field_in_additional_inputs():
+    from osdagbridge_core.core.bridge_types.plate_girder.ui_fields_additional_input import DESIGN_OPTIONS_SCHEMA
+    fields = [f for section in DESIGN_OPTIONS_SCHEMA["sections"] for row in section.get("rows", []) for f in row["fields"]]
+    field = next(f for f in fields if f["id"] == C.KEY_ANALYSIS_ENGINE)
+    assert field["choices"] == [C.ENGINE_SETU, C.ENGINE_OSPGRILLAGE]
+
+
+# The dialog's saved form of a bracing pair matches the untouched pairs, so it is not refused.
+def test_gui_bracing_values_accepted():
+    d = supported_input()
+    suffix = ".G1G2.B1M1"
+    d[C.KEY_MP_CB_BRACING_SECTION_DESIGNATION + suffix] = "∠ 100 ⅹ 100ⅹ 10"
+    d[C.KEY_MP_CB_TOP_CHORD + suffix] = True
+    d[C.KEY_MP_CB_BOTTOM_CHORD + suffix] = False
+    normalise_gui_bracing(d)
+    assert d[C.KEY_MP_CB_BRACING_SECTION_DESIGNATION + suffix] == "IS 100 x 100 x 10"
+    assert d[C.KEY_MP_CB_TOP_CHORD + suffix] == "Yes"
+    assert d[C.KEY_MP_CB_BOTTOM_CHORD + suffix] == "No"
 
 
 # Required material inputs cannot silently become a default value.
@@ -375,8 +516,9 @@ def test_independent_edge_uls(setu_bridge):
 def test_engine_boundaries(setu_bridge):
     engine = setu_bridge.grillage_model
     data = engine.get_result_data()
-    assert dict(data) == {"girders": {f"G{g + 1}": {} for g in range(4)}}
-    for key in ("crossbracings", "forces", "nodes", "displacements", "loadcases", "members"):
+    assert data["girders"] == {f"G{g + 1}": {} for g in range(4)}
+    assert data["members"] and data["forces"].get("1.0 DL") and data["forces"].get("no such case", {}) == {}
+    for key in ("crossbracings", "nodes", "displacements", "loadcases"):
         with pytest.raises(NotImplementedError, match="not provided by the setu engine"):
             data[key]
         with pytest.raises(NotImplementedError, match="not provided by the setu engine"):
@@ -545,7 +687,8 @@ def test_plotted_values_are_setus(setu_geometry):
         design = engine.design_values.girders[girder][MAX_MOMENT][BASIC][BIGGER_IS_WORSE]
         envelope = handler._get_forces_df("Envelope ULS", name, "Mz_i").iloc[:, 1].to_numpy()
         station = list(steel.stations_m).index(design.at_m)
-        assert envelope[station] == pytest.approx(design.value, rel=1e-6)
+        # A state governing another section can beat this section's search slightly: the search samples positions.
+        assert design.value * (1 - 1e-6) <= envelope[station] <= design.value * (1 + 5e-4)
     left, right = b._reaction_summary["SW"]["left_kN"], b._reaction_summary["SW"]["right_kN"]
     assert left < 0 < right, "reactions keep ospgrillage's signs: left as Vy_i, right as -Vy_j"
 

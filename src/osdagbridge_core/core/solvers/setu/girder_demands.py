@@ -58,6 +58,39 @@ def deflection_demands(cache):
                 delta_total_mm=cache["total_mm"], camber_mm=cache["camber_mm"])
 
 
+# The designer's check type for a load case in the plots' dropdown.
+def case_kind(name):
+    if name.startswith(("BASIC_", "SEISMIC_")) or name == "Envelope ULS":
+        return "ULS"
+    if name.startswith("SLS_FREQUENT_"):
+        return "SLS_frequent"
+    if name.startswith("SLS_") or name == "Envelope SLS":
+        return "SLS"
+    if name == "1.0 DL":
+        return "DL"
+    if name == "1.0 LL" or name.startswith("Case "):
+        return "live_only"
+    return "individual"
+
+
+# One girder's demand under one load case of the plots' dropdown, worst over the states of an envelope.
+def case_demand(states, girder, name, envelope):
+    prefixes = {"Envelope ULS": ("BASIC_", "SEISMIC_"), "Envelope SLS": ("SLS_",)}.get(name)
+    forces = [state[girder] for case, state in states.items() if (case.startswith(prefixes) if prefixes else case == name)]
+    if not forces:
+        return None
+    moment = max(float(abs(f.composite_moment_kn_m).max()) for f in forces)
+    shear = max(float(abs(f.shear_kn).max()) for f in forces)
+    deflection = max(float(abs(f.deflection_m).max()) for f in forces) * 1000
+    kind = case_kind(name)
+    service = kind != "ULS"
+    return {"Mu_kNm": moment, "Vu_kN": shear, "M_sls_kNm": moment if service else 0.0, "V_sls_kN": shear if service else 0.0,
+            "M_construction_kNm": moment if kind == "DL" else 0.0, "M_girder_sw_kNm": moment if name == "SW" else 0.0,
+            "delta_live_mm": deflection if kind == "live_only" else 0.0, "delta_dl_mm": deflection if kind == "DL" else 0.0,
+            "stress_range_MPa": envelope.stress_range_MPa if kind == "SLS_frequent" else 0.0,
+            "shear_range_MPa": envelope.shear_range_MPa if kind == "SLS_frequent" else 0.0, "lc_type": kind}
+
+
 # Scope each native combination to the designer's check types.
 def combination_demands(values, girder, config, fatigue):
     result = {}
