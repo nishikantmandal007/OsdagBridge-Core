@@ -880,30 +880,18 @@ def build_load_effects_cache(result_handler) -> dict:
 
     cache: dict = {}
     gi = 1
+    known_elements = set(ds["Element"].values.tolist())
     for girder, gdata in g_map.items():
         if girder.startswith("EB"):
             continue
         girder_label = f"G{gi}"
         gi += 1
-        elements = gdata["elements"]
+        elements = [eid for eid in gdata["elements"] if eid in known_elements]
         cache[girder_label] = {}
         for lc in lcs:
-            mz_vals: list[float] = []
-            vy_vals: list[float] = []
-            for comp in ("Mz_i", "Mz_j"):
-                for eid in elements:
-                    try:
-                        val = float(ds.sel(Loadcase=lc, Element=eid, Component=comp)["forces"]) / 1000.0
-                        mz_vals.append(val)
-                    except Exception:
-                        pass
-            for comp in ("Vy_i", "Vy_j"):
-                for eid in elements:
-                    try:
-                        val = float(ds.sel(Loadcase=lc, Element=eid, Component=comp)["forces"]) / 1000.0
-                        vy_vals.append(val)
-                    except Exception:
-                        pass
+            forces = ds["forces"].sel(Loadcase=lc, Element=elements)
+            mz_vals = (forces.sel(Component=["Mz_i", "Mz_j"]).transpose("Component", "Element").values.ravel() / 1000.0).tolist()
+            vy_vals = (forces.sel(Component=["Vy_i", "Vy_j"]).transpose("Component", "Element").values.ravel() / 1000.0).tolist()
             if mz_vals or vy_vals:
                 cache[girder_label][str(lc)] = {
                     "Mz_max": round(max(mz_vals), 3) if mz_vals else None,
@@ -912,6 +900,23 @@ def build_load_effects_cache(result_handler) -> dict:
                     "Vy_min": round(min(vy_vals), 3) if vy_vals else None,
                 }
     return cache
+
+
+def _peak_location(ds, lc, element_map, component, nodes_coords):
+    """x (m) of the node with the largest |component| along one girder's elements, or None."""
+    known = set(ds["Element"].values.tolist())
+    element_map = [entry for entry in element_map if entry[0] in known]
+    if not element_map:
+        return None
+    values = ds["forces"].sel(Loadcase=lc, Element=[entry[0] for entry in element_map],
+                              Component=[f"{component}_i", f"{component}_j"]).transpose("Element", "Component").values / 1000.0
+    best_abs, location = 0.0, None
+    for (_, n1, n2), (val_i, val_j) in zip(element_map, values):
+        for val, node in ((val_i, n1), (val_j, n2)):
+            if abs(val) > best_abs and node in nodes_coords:
+                best_abs = abs(val)
+                location = round(nodes_coords[node][0], 3)
+    return location
 
 
 def composite_stiffness_props(config) -> tuple[dict, float]:
@@ -1138,32 +1143,10 @@ def build_forces_summary(result_handler, load_effects_cache: dict) -> dict:
         sf_gmap_key = cache_label_to_gmap_key.get(sf_girder)
 
         if bm_gmap_key:
-            best_abs = 0.0
-            for eid, n1, n2 in g_map[bm_gmap_key].get("element_map", []):
-                for comp, node in (("Mz_i", n1), ("Mz_j", n2)):
-                    try:
-                        val = float(ds.sel(
-                            Loadcase=lc, Element=eid, Component=comp
-                        )["forces"]) / 1000.0
-                        if abs(val) > best_abs:
-                            best_abs = abs(val)
-                            bm_location = round(nodes_coords[node][0], 3)
-                    except Exception:
-                        pass
+            bm_location = _peak_location(ds, lc, g_map[bm_gmap_key].get("element_map", []), "Mz", nodes_coords)
 
         if sf_gmap_key:
-            best_abs = 0.0
-            for eid, n1, n2 in g_map[sf_gmap_key].get("element_map", []):
-                for comp, node in (("Vy_i", n1), ("Vy_j", n2)):
-                    try:
-                        val = float(ds.sel(
-                            Loadcase=lc, Element=eid, Component=comp
-                        )["forces"]) / 1000.0
-                        if abs(val) > best_abs:
-                            best_abs = abs(val)
-                            sf_location = round(nodes_coords[node][0], 3)
-                    except Exception:
-                        pass
+            sf_location = _peak_location(ds, lc, g_map[sf_gmap_key].get("element_map", []), "Vy", nodes_coords)
 
         lc_summary[lc] = {
             "max_bm":      round(global_bm, 3),

@@ -793,6 +793,10 @@ KEY_BL_IRC_70R_TRACKED    = "bl_irc_70r_tracked"
 KEY_BL_IRC_70R_BOGIE      = "bl_irc_70r_bogie"
 KEY_BL_IRC_CLASS_SV       = "bl_irc_class_sv"
 KEY_BL_IRC_CLASS_FATIGUE  = "bl_irc_class_fatigue"
+
+# setu always searches the first family and cannot analyse the second, so the GUI ticks and unticks them for it.
+SETU_REQUIRED_VEHICLES = (KEY_LL_IRC_CLASS_A, KEY_LL_IRC_70R_WHEELED, KEY_LL_IRC_70R_TRACKED, KEY_LL_IRC_AA_WHEELED, KEY_LL_IRC_AA_TRACKED)
+SETU_UNSUPPORTED_VEHICLES = (KEY_LL_IRC_CLASS_SV, KEY_BL_IRC_CLASS_SV, KEY_LL_IRC_70R_BOGIE)
 KEY_BL_ECCENTRICITY       = "bl_eccentricity"
 
 # Custom Vehicle
@@ -1927,6 +1931,17 @@ def get_angle_designation_list() -> list[str]:
         return sorted(designations)
     except sqlite3.Error:
         return []
+
+
+def get_channel_section_properties(designation: str) -> dict:
+    """Fetch section properties for a channel from the Channels table, e.g. "MC 100"."""
+    con = sqlite3.connect(_DB_PATH)
+    con.row_factory = sqlite3.Row
+    row = con.execute("SELECT * FROM Channels WHERE Designation = ?", (designation.strip(),)).fetchone()
+    con.close()
+    if row is None:
+        raise LookupError(f"Channel designation '{designation}' not found in Channels table")
+    return dict(row)
 
 
 def get_channel_section_list() -> list[str]:
