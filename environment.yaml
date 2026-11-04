@@ -4,7 +4,7 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python>=3.11,<3.13
+  - python>=3.12,<3.13
   - pip
   - osdag
   - pythonocc-core
@@ -23,4 +23,6 @@ dependencies:
   - pip:
       - openseespy>=3.2.2.6
       - opsvis>=1.0
+      - setu @ git+https://github.com/nishikantmandal007/setu.git@main
+      - osdag-core @ git+https://github.com/osdag-admin/osdag-core.git@main
       - -e .

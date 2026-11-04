@@ -16,13 +16,13 @@ build:
 
 requirements:
   host:
-    - python >=3.11,<3.13
+    - python >=3.12,<3.13
     - pip
     - setuptools >=61
     - wheel
 
   run:
-    - python >=3.11,<3.13
+    - python >=3.12,<3.13
     - pip
     - osdag
     - pythonocc-core
@@ -37,6 +37,7 @@ requirements:
     - xarray
     - ifcopenshell
     - plotly
+    - setu
 
 test:
   imports:
