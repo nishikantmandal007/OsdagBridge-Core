@@ -228,8 +228,9 @@ def ch3_loads(input_dict, output_dict=None):
     ]
 
     # Vz / Pz — prefer stored computed values; fall back to IRC6 Table 12
-    vz_val = input_dict.get(KEY_WL_HOURLY_MEAN_WIND)
-    pz_val = input_dict.get(KEY_WL_HOURLY_WIND_PRESSURE)
+    # the engine's own values first (setu: IRC 6 cl. 209 as amended by Amendment 10), then the dialog's
+    vz_val = output_dict.get(KEY_WL_HOURLY_MEAN_WIND) or input_dict.get(KEY_WL_HOURLY_MEAN_WIND)
+    pz_val = output_dict.get(KEY_WL_HOURLY_WIND_PRESSURE) or input_dict.get(KEY_WL_HOURLY_WIND_PRESSURE)
     if not vz_val or not pz_val:
         try:
             _vb  = input_dict.get(KEY_WL_BASIC_WIND_SPEED) or input_dict.get('wind_speed')

@@ -14,12 +14,24 @@ def refuse_vehicle(key, value):
     raise ValueError(f"{key}={value!r}: this vehicle is not analysed by either engine (ospgrillage leaves it out without saying so); untick it")
 
 
+# IRC:6-2017 as amended no longer has these: Class AA (deleted by Amendment 10, cl. 201.1 and Annex A) and braking with Class SV
+# (cl. 204.5.4: no braking on the SV); Class B is for timber bridges.
+NOT_IN_IRC = {C.KEY_LL_IRC_AA_WHEELED: "Class AA was deleted by IRC:6 Amendment 10 (cl. 201.1, Annex A)",
+              C.KEY_LL_IRC_AA_TRACKED: "Class AA was deleted by IRC:6 Amendment 10 (cl. 201.1, Annex A)",
+              C.KEY_BL_IRC_CLASS_SV: "IRC:6 cl. 204.5.4 applies no braking with Class SV"}
+
+
 # Refuse only what would make the results wrong or that setu cannot run at all.
 def check_capability(bridge):
     d = bridge.input_dict
-    for key in (*C.SETU_UNSUPPORTED_VEHICLES, "loading.live_load.irc.class_b"):
-        if key in d and d[key]:
-            refuse_vehicle(key, d[key])
+    for key, why in NOT_IN_IRC.items():
+        if d.get(key):
+            raise ValueError(f"{key}={d[key]!r}: {why}; untick it or choose the ospgrillage analysis engine")
+    if d.get("loading.live_load.irc.class_b"):
+        refuse_vehicle("loading.live_load.irc.class_b", d["loading.live_load.irc.class_b"])
+    if d[C.KEY_LL_ROAD_CATEGORY] == C.ROAD_SV_REQUIRED and not d[C.KEY_LL_IRC_CLASS_SV]:
+        raise ValueError(f"{C.KEY_LL_IRC_CLASS_SV} is unticked: IRC:6 cl. 201.1 as amended requires Class SV for all new bridges except over "
+                         f"rural, district and village roads; tick it, or set {C.KEY_LL_ROAD_CATEGORY} to the rural, district or village road")
     if "temperature_load_kN_m2" in d and float(d["temperature_load_kN_m2"]):
         refuse("temperature_load_kN_m2", d["temperature_load_kN_m2"])
     for key in C.SETU_REQUIRED_VEHICLES:
@@ -46,8 +58,6 @@ def simplifications(bridge):
         notes.append("The custom footpath pressure is not used: footpath live load follows IRC:6")
     if float(d[C.KEY_PL_SELF_WEIGHT_FACTOR]) != 1.0:
         notes.append("The self-weight factor is not used: self weight is applied at 1.0")
-    if d[C.KEY_WL_SITE_TOPOGRAPHY] not in ("Flat", "Funnelling"):
-        notes.append(f"Topography '{d[C.KEY_WL_SITE_TOPOGRAPHY]}' is not used: wind pressure is taken as for flat ground")
     if d[C.KEY_WL_WIND_LL_ECC_MODE] != "As per IRC 6":
         notes.append("The custom eccentricity of wind on live load is not used: it follows IRC:6")
     span = float(d[C.KEY_SPAN])
