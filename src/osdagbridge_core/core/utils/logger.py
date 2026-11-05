@@ -86,6 +86,14 @@ class BridgeLogger:
             except Exception:
                 pass
 
+    # for the progress window only: not written to the log file or the log window
+    def status(self, raw: str, level: str) -> None:
+        for cb in list(self._callbacks):
+            try:
+                cb(raw, level)
+            except Exception:
+                pass
+
     def _blank(self) -> None:
         log.info("")  # Visual separator in raw Python log only; not sent to UI callbacks
 
