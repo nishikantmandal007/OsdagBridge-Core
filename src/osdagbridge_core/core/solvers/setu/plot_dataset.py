@@ -28,7 +28,9 @@ def load_states(values):
     states[DEAD_LOAD_CASE] = girders.dead.factored({DEAD: 1.0, SURFACING: 0.0})
     governing_girder, _ = girders.governing(MAX_MOMENT, BASIC, BIGGER_IS_WORSE)
     states[LIVE_LOAD_CASE] = diagrams.live[governing_girder, MAX_MOMENT, BIGGER_IS_WORSE]
-    states[BRAKING_CASE] = diagrams.braking[governing_girder, MAX_MOMENT, BIGGER_IS_WORSE]
+    # no braking state where a congested or crowd case governs (IRC:6 cl. 204.4 leaves braking out)
+    if (governing_girder, MAX_MOMENT, BIGGER_IS_WORSE) in diagrams.braking:
+        states[BRAKING_CASE] = diagrams.braking[governing_girder, MAX_MOMENT, BIGGER_IS_WORSE]
     for (girder, response, adverse), forces in diagrams.live.items():
         states[f"Case G{girder + 1} {response}, {adverse}"] = forces
     for name, forces in diagrams.wind.items():
