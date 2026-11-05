@@ -34,22 +34,45 @@ def available_memory_gb():
     return None
 
 
+# Progress percentage within Stage 4G (between Stage 2 at 14% and Stage 4G complete at 71%) for each setu phase.
+PHASE_PROGRESS_PCT = {
+    "building the model and solving the dead load stages": 20,
+    "factorising the stiffness matrix": 28,
+    "solving and searching the girders": 38,
+    "searching the girders": 38,
+    "solving and searching the braces": 48,
+    "searching the braces": 48,
+    "solving and searching the Class SV": 56,
+    "the construction stage on the bare steel": 62,
+    "replaying the governing load states": 66,
+}
+
+
 # Say how big the run is, warn if it may not fit, and choose the workers that do.
 def plan_run(d):
     nodes, gb = estimated_peak_gb(d)
     available = available_memory_gb()
     workers = workers_that_fit(MOST_WORKERS, gb, available)
+    bridge_logger._emit("__progress__16", "progress")
     bridge_logger.sub_step(f"setu: {nodes} deck nodes, estimated peak about {gb:.1f} GB, {workers} workers")
     if available is not None and gb > available:
         bridge_logger.warning(f"This bridge may need about {gb:.1f} GB with only {available:.1f} GB free; close other programs or expect it to be slow")
     return workers
 
 
+# Log one setu phase and advance the progress bar.
+def report_phase(text):
+    pct = PHASE_PROGRESS_PCT.get(text)
+    if pct is not None:
+        bridge_logger._emit(f"__progress__{pct}", "progress")
+    bridge_logger.sub_step(f"setu: {text}")
+
+
 # The whole analysis in its own process: Stop ends it at once and its memory returns to the system when it finishes.
 def solve(bridge_in, wind, seismic, temperature, braking_height_m, workers, **extras):
     values, forces = solve_in_own_process(
         bridge_in, wind, seismic, temperature, braking_height_m, workers=workers,
-        phase=lambda text: bridge_logger.sub_step(f"setu: {text}"), check=bridge_logger.check_cancel, **extras)
+        phase=report_phase, check=bridge_logger.check_cancel, **extras)
     return values, report_forces(forces)
 
 
