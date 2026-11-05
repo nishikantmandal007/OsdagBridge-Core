@@ -6,6 +6,7 @@ from setu.postprocess.own_process import solve_in_own_process
 from osdagbridge_core.core.bridge_types.plate_girder.designer import BridgeConfig
 from osdagbridge_core.core.utils import common as C
 from osdagbridge_core.core.utils.logger import bridge_logger
+from setu.irc6.temperature import effective_temperature_range
 from setu.irc6.wind import design_wind_speed_mps, wind_pressure_pa
 from .bridge_input import (bridge_input, construction_loads, construction_seismic_site, estimated_peak_gb, fill_unequal_depth_wind, normalise_gui_bracing,
                            reconcile_layout, seismic_site, temperature_site, wind_site, workers_that_fit)
@@ -58,6 +59,16 @@ def wind_report(wind):
         return {}
     speed = design_wind_speed_mps(wind, wind.superstructure_top_m, wind.return_period_years)
     return {C.KEY_WL_HOURLY_MEAN_WIND: round(speed, 2), C.KEY_WL_HOURLY_WIND_PRESSURE: round(wind_pressure_pa(speed), 2)}
+
+
+# The effective bridge temperature range and rise/fall (cl. 215.2) for the report's temperature table.
+def temperature_report(temperature):
+    if temperature is None:
+        return {}
+    t_min, t_max = effective_temperature_range(temperature.shade_max_c, temperature.shade_min_c, temperature.snowbound)
+    half_range = (t_max - t_min) / 2
+    return {C.KEY_TL_BRIDGE_TEMP_MIN: f"{t_min:.2f}", C.KEY_TL_BRIDGE_TEMP_MAX: f"{t_max:.2f}",
+            C.KEY_TL_TEMP_RISE: f"{half_range:.2f}", C.KEY_TL_TEMP_FALL: f"{half_range:.2f}"}
 
 
 # The wind and seismic forces the report's load tables print.
@@ -118,6 +129,7 @@ class SetuAnalysisEngine:
                                            special_vehicle=bool(d[C.KEY_LL_IRC_CLASS_SV]), construction=construction_loads(d),
                                            construction_seismic=construction_seismic_site(d))
         self.report_forces.update(wind_report(self.wind))
+        self.report_forces.update(temperature_report(self.temperature))
         self.design_values, self.brace_values, self.diagrams = values.girders, values.braces, values.diagrams
         self.special_vehicle, self.construction = values.special_vehicle, values.construction
         self.analysis_seconds = perf_counter() - start

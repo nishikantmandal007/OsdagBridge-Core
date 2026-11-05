@@ -975,7 +975,7 @@ _TEMPERATURE_LOAD_TAB_SCHEMA = {
                 },
                 {"fields": [{"id": KEY_TL_THERMAL_COEFF_STEEL, "label": "Coefficient of Thermal Expansion for Steel (&#xD7;10<sup>-6</sup>/°C)", "type": TYPE_TEXTBOX, "read_only": True, "placeholder": "e.g. 11.7",        }]},
                 {"fields": [{"id": KEY_TL_THERMAL_COEFF_RCC,   "label": "Coefficient of Thermal Expansion for RCC (&#xD7;10<sup>-6</sup>/°C)",   "type": TYPE_TEXTBOX, "read_only": True, "placeholder": "e.g. 11.7",        }]},
-                {"fields": [{"id": KEY_TL_SNOWBOUND, "label": "Snowbound Region (cl. 215.2; setu engine)", "type": TYPE_CHECKBOX, "label_first": True}]},
+                {"fields": [{"id": KEY_TL_SNOWBOUND, "label": "Snowbound Region (cl. 215.2; setu engine)", "type": TYPE_CHECKBOX, "label_first": True, "on_change_compute": {"function": "_compute_temperature_values"}}]},
             ],
         },
 
