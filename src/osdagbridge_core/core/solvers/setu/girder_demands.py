@@ -1,5 +1,21 @@
+from setu.irc6.irc_constants import CONSTRUCTION_DEAD_FACTORS, VARIABLE_LOAD_FACTORS
+from setu.utils.constants import FREQUENT, LIVE
 from osdagbridge_core.core.bridge_types.plate_girder.designer import (
     DemandEnvelope, apply_camber_to_deflections_cache)
+
+# Annex B cl. 7.2 as amended by Amendment 10: deflection limits in all structures use Table B.3 column 3 (frequent), live load leading
+FREQUENT_LIVE_LOAD_FACTOR = VARIABLE_LOAD_FACTORS[FREQUENT][LIVE][0]
+# Table B.2: construction-stage dead load, adverse
+CONSTRUCTION_DEAD_FACTOR = CONSTRUCTION_DEAD_FACTORS[0]
+CONSTRUCTION_STATES = ("ultimate, construction", "ultimate, seismic during construction")
+
+
+# Every governing value of one girder response in these limit states, with Class SV's where it was analysed.
+def candidates(values, special_vehicle, girder, response, states):
+    found = [v for state in states for v in values.girders[girder][response].get(state, {}).values()]
+    if special_vehicle is not None:
+        found += [v for state in states for v in special_vehicle.girders[girder][response].get(state, {}).values()]
+    return found
 from osdagbridge_core.core.utils import common as C
 
 
@@ -8,25 +24,28 @@ def governing(values):
     return max(values, key=lambda value: abs(value.value))
 
 
-# Read basic ULS, enabled seismic ULS and rare SLS without recombining them.
-def force_demands(values, seismic):
+# Read basic ULS, enabled seismic ULS and rare SLS without recombining them; Class SV competes where it was analysed.
+def force_demands(values, girder, seismic, special_vehicle=None):
     states = ["ultimate, basic"] + (["ultimate, seismic"] if seismic else [])
-    moment = governing(v for state in states for v in values["maximum composite moment"][state].values())
-    shear = governing(v for state in states for v in values["support shear"][state].values())
-    rare_m = governing(values["maximum composite moment"]["serviceability, rare"].values())
-    rare_v = governing(values["support shear"]["serviceability, rare"].values())
+    moment = governing(candidates(values, special_vehicle, girder, "maximum composite moment", states))
+    shear = governing(candidates(values, special_vehicle, girder, "support shear", states))
+    rare_m = governing(candidates(values, special_vehicle, girder, "maximum composite moment", ["serviceability, rare"]))
+    rare_v = governing(candidates(values, special_vehicle, girder, "support shear", ["serviceability, rare"]))
     return dict(Mu_kNm=abs(moment.value), Vu_kN=abs(shear.value),
                 M_sls_kNm=abs(rare_m.value), V_sls_kN=abs(rare_v.value),
                 governing_combination=moment.combination, location=f"{moment.at_m} m")
 
 
-# Read the bare-steel construction moments at the ULS design station.
-def construction_demands(dead, girder, at_m):
+# ULS construction demands on the bare steel for the designer's LTB checks: stage 1 the girder's own weight times the Table B.2
+# construction dead-load factor, stage 2 setu's governing construction combination (steel, wet slab, shuttering, construction live
+# load, wind and seismic during construction). Both 0 when the construction stage is left out, so the designer skips them.
+def construction_demands(dead, construction, girder):
+    if construction is None:
+        return dict(M_girder_sw_kNm=0.0, M_construction_kNm=0.0)
     steel = dead.stages["steel self weight"][girder]
-    slab = dead.stages["wet slab"][girder]
-    station = abs(steel.stations_m - at_m).argmin()
-    return dict(M_girder_sw_kNm=abs(float(steel.composite_moment_kn_m[station])),
-                M_construction_kNm=abs(float(steel.composite_moment_kn_m[station] + slab.composite_moment_kn_m[station])))
+    stage_2 = governing(v for state in CONSTRUCTION_STATES for v in construction.girders[girder]["maximum composite moment"].get(state, {}).values())
+    return dict(M_girder_sw_kNm=CONSTRUCTION_DEAD_FACTOR * float(abs(steel.composite_moment_kn_m).max()),
+                M_construction_kNm=abs(stage_2.value))
 
 
 # The bottom steel face cycles in bending; web area converts kN to MPa.
@@ -36,12 +55,13 @@ def fatigue_demands(values, girder, config, enabled):
                 Vr_kN=values.live_shear_range_kn[girder])
 
 
-# Keep the cache's raw keys and actual stage names, converting metres to mm.
+# Keep the cache's raw keys and actual stage names, converting metres to mm; live load deflection in the frequent combination.
 def raw_deflections(values):
     return {f"G{g + 1}": {
-        C.KEY_SD_DEFL_LIVE_RAW: d["live_m"] * 1000,
+        C.KEY_SD_DEFL_LIVE_RAW: FREQUENT_LIVE_LOAD_FACTOR * d["live_m"] * 1000,
         C.KEY_SD_DEFL_DL_RAW: sum(d["dead_m"].values()) * 1000,
-        C.KEY_SD_DEFL_TOTAL_RAW: d["total_m"] * 1000,
+        # dead load deflection stays unfactored: it sets the camber
+        C.KEY_SD_DEFL_TOTAL_RAW: (sum(d["dead_m"].values()) + FREQUENT_LIVE_LOAD_FACTOR * d["live_m"]) * 1000,
         "per_lc": {stage: value * 1000 for stage, value in d["dead_m"].items()},
     } for g, d in values.deflections.items()}
 
@@ -91,12 +111,26 @@ def case_demand(states, girder, name, envelope):
             "shear_range_MPa": envelope.shear_range_MPa if kind == "SLS_frequent" else 0.0, "lc_type": kind}
 
 
+# Each Class SV combination's governing moment and shear, by combination name, as the native combinations are held.
+def special_vehicle_combinations(special_vehicle, girder):
+    by_name = {}
+    for response in ("maximum composite moment", "support shear"):
+        for by_direction in special_vehicle.girders[girder][response].values():
+            for value in by_direction.values():
+                by_name.setdefault(value.combination, {}).setdefault(response, {})[value.adverse] = value
+    return {name: responses for name, responses in by_name.items() if len(responses) == 2}
+
+
 # Scope each native combination to the designer's check types.
-def combination_demands(values, girder, config, fatigue):
+def combination_demands(values, girder, config, fatigue, special_vehicle=None):
     result = {}
-    for name, directions in values.combinations[girder]["maximum composite moment"].items():
-        moment = governing(directions.values())
-        shear = governing(values.combinations[girder]["support shear"][name].values())
+    combinations = {name: {"maximum composite moment": directions, "support shear": values.combinations[girder]["support shear"][name]}
+                    for name, directions in values.combinations[girder]["maximum composite moment"].items()}
+    if special_vehicle is not None:
+        combinations.update(special_vehicle_combinations(special_vehicle, girder))
+    for name, responses in combinations.items():
+        moment = governing(responses["maximum composite moment"].values())
+        shear = governing(responses["support shear"].values())
         kind = ("ULS" if name.startswith("ultimate,") else
                 "SLS_frequent" if name.startswith("serviceability, frequent") else "SLS")
         result[name] = DemandEnvelope(
@@ -111,18 +145,16 @@ def combination_demands(values, girder, config, fatigue):
 
 
 # Build the designer's existing demand seam directly from the public results.
-def girder_demands(values, configs, cache, seismic, fatigue_enabled):
+def girder_demands(values, configs, cache, seismic, fatigue_enabled, special_vehicle=None, construction=None):
     demands, per_lc = {}, {}
     for g, config in enumerate(configs):
         name = f"G{g + 1}"
-        forces = force_demands(values.girders[g], seismic)
-        states = ["ultimate, basic"] + (["ultimate, seismic"] if seismic else [])
-        moment = governing(v for state in states for v in values.girders[g]["maximum composite moment"][state].values())
+        forces = force_demands(values, g, seismic, special_vehicle)
         fatigue = fatigue_demands(values, g, config, fatigue_enabled)
         # The steel axial force belongs to the internal composite couple.
         demands[name] = DemandEnvelope(
-            **forces, **construction_demands(values.dead, g, moment.at_m),
+            **forces, **construction_demands(values.dead, construction, g),
             **fatigue, **deflection_demands(cache[name]), Nu_kN=0.0,
             Nsc=config.fatigue.Nsc, member=name, source="setu")
-        per_lc[name] = combination_demands(values, g, config, fatigue)
+        per_lc[name] = combination_demands(values, g, config, fatigue, special_vehicle)
     return demands, per_lc

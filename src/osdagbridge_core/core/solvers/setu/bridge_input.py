@@ -4,15 +4,15 @@ import re
 from setu import (AddedDeadLoads, Bracing, BridgeInput, Concrete, DeckCrossSection,
                   DeckSlab, Girders, MeshSettings, PlateGirderSection, SeismicSite,
                   Steel, TemperatureSite, WindSite)
-from setu.irc6.wind import drag_coefficient
+from setu.builder.mesh import stations_along_span
+from setu.irc6.wind import CYCLONE_COAST, INLAND, OFFSHORE, drag_depth_m, exposed_depth_m, service_drag_coefficient
+from setu.postprocess.construction import ConstructionLoads
 from osdagbridge_core.core.bridge_types.plate_girder.analyser import BridgeGrillageModel
 from osdagbridge_core.core.utils import common as C
 from osdagbridge_core.core.utils.codes.irc6_2017 import IRC6_2017
 from osdagbridge_core.core.bridge_types.plate_girder.bridge_geometry import CrossSectionLayout
 
 
-PANELS_BETWEEN_BRACES = 16
-TARGET_SIZE_ACROSS_M = 0.15
 GB_PER_WORKER = 0.7  # measured: 8 workers used about 7.2 GB on a 20.85 m deck, 4 workers 2.74 GB
 
 
@@ -22,7 +22,13 @@ def cross_section(d):
         carriageway_width=float(d[C.KEY_CARRIAGEWAY_WIDTH]), crash_barrier_width=float(d[C.KEY_CB_WIDTH]),
         railing_width=float(d[C.KEY_RL_WIDTH]), footpath_width=float(d[C.KEY_TS_FOOTPATH_WIDTH]),
         median_width=float(d[C.KEY_MD_WIDTH]), n_footpaths=int(d[C.KEY_TS_NO_OF_FOOTPATHS]))
-    return DeckCrossSection.from_widths({strip.name: strip.width for strip in layout.components})
+    return DeckCrossSection.from_widths({strip.name: strip.width for strip in layout.components},
+                                        crowd_load=bool(d[C.KEY_LL_CROWD_LOAD]), congestion=bool(d[C.KEY_LL_CONGESTION]))
+
+
+# The setu mesh preset the user chose (Fast, Standard, Fine).
+def mesh_settings(d):
+    return MeshSettings.preset(d[C.KEY_ANALYSIS_MESH].lower())
 
 
 # Keep each girder's resolved plates in metres.
@@ -101,9 +107,9 @@ def reconcile_layout(d):
 # Deck nodes and a rough peak memory in GB of the analysis process and its workers: a base plus one stiffness factor (banded estimate).
 # ponytail: fitted to two measured runs (free RAM drop with 4 workers: 8.4 m 1.85 GB, 20.85 m 2.74 GB); refit when more widths are measured.
 def estimated_peak_gb(d):
-    girders, braces = int(d[C.KEY_TS_NO_OF_GIRDERS]), int(d[C.KEY_MP_CB_NO_OF_CROSS_BRACINGS])
-    along = PANELS_BETWEEN_BRACES * (braces + 1) + 1
-    across = round(cross_section(d).total_width_m() / TARGET_SIZE_ACROSS_M) + 1
+    braces, span, mesh = int(d[C.KEY_MP_CB_NO_OF_CROSS_BRACINGS]), float(d[C.KEY_SPAN]), mesh_settings(d)
+    along = len(stations_along_span([span * i / (braces + 1) for i in range(braces + 2)], mesh))
+    across = round(cross_section(d).total_width_m() / mesh.target_size_across_width_m) + 1
     nodes = along * across
     return nodes, 1.7 + 0.85 * 6 * nodes * 8 * 6 * min(along, across) / 1024 ** 3
 
@@ -121,7 +127,7 @@ def bridge_input(bridge):
     return BridgeInput(
         float(d[C.KEY_SPAN]), math.tan(math.radians(float(d[C.KEY_SKEW_ANGLE]))), cross_section(d),
         DeckSlab(float(d[C.KEY_TS_DECK_THICKNESS]) / 1000, float(d[C.KEY_TS_DECK_OVERHANG]), float(d[C.KEY_WC_THICKNESS]) / 1000),
-        girder_sections(bridge), bracing(d), MeshSettings(PANELS_BETWEEN_BRACES, TARGET_SIZE_ACROSS_M),
+        girder_sections(bridge), bracing(d), mesh_settings(d),
         steel_material(bridge), concrete_material(d), float(d[C.KEY_WC_DENSITY]), added_dead_loads(d))
 
 
@@ -134,7 +140,10 @@ def site_override(d, mode, value):
     raise ValueError(f"{mode}={d[mode]!r}: choose the ospgrillage analysis engine")
 
 
-# Pass the selected wind coefficients and site geometry through.
+K4_REGIONS = {C.K4_OTHER: INLAND, C.K4_CYCLONE_COAST: CYCLONE_COAST, C.K4_OFFSHORE: OFFSHORE}
+
+
+# IRC:6 cl. 209 as replaced by Amendment 10: the site inputs and any custom coefficient.
 def wind_site(d):
     weather = d[C.KEY_PROJECT_LOCATION]["weather_data"]
     if float(weather["wind_speed"]) == 0:
@@ -149,26 +158,28 @@ def wind_site(d):
         "live_load_exposed_area_m2": (C.KEY_WL_EXPOSED_FRONTAL_MODE, C.KEY_WL_EXPOSED_FRONTAL_VALUE),
         "force_height_above_deck_m": (C.KEY_WL_WIND_ECC_DECK_MODE, C.KEY_WL_WIND_ECC_DECK_VALUE),
     }
-    return WindSite(float(weather["wind_speed"]), {"Plain Terrain": "plain", "Obstructed Terrain": "obstructed"}[d[C.KEY_WL_TERRAIN_TYPE]],
-                    float(d[C.KEY_WL_AVG_EXPOSED_HEIGHT]), d[C.KEY_WL_SITE_TOPOGRAPHY] == "Funnelling",
-                    float(d[C.KEY_CB_HEIGHT]) if float(d[C.KEY_CB_WIDTH]) else 0.0,
+    return WindSite(float(weather["wind_speed"]), C.TERRAIN_CATEGORIES.index(d[C.KEY_WL_TERRAIN_CATEGORY]) + 1,
+                    float(d[C.KEY_WL_AVG_EXPOSED_HEIGHT]), float(d[C.KEY_WL_ROAD_LEVEL]), float(d[C.KEY_WL_PIER_HEIGHT]),
+                    int(d[C.KEY_WL_RETURN_PERIOD]), d[C.KEY_WL_K3_LOCATION] == C.K3_VALLEY_OR_LEEWARD, K4_REGIONS[d[C.KEY_WL_CYCLONIC_REGION]],
+                    float(d[C.KEY_WL_CROSS_SLOPE]), float(d[C.KEY_CB_HEIGHT]) if float(d[C.KEY_CB_WIDTH]) else 0.0,
                     **{name: site_override(d, *keys) for name, keys in pairs.items()})
 
 
-# setu asks for explicit wind area, drag and height when girder depths differ: fill what the user left automatic from the deepest girder.
+# setu asks for explicit wind area, drag and height when girder depths differ: fill what the user left automatic as setu would for
+# equal girders of the deepest depth (Fig. 5 exposed depth, Fig. 7 / Table 8 drag, the area's centroid), without live load.
 def fill_unequal_depth_wind(wind, bridge):
     depths = [section.depth_m for section in bridge.girders.section_of_each_girder]
     if wind is None or len(set(depths)) == 1:
         return
-    depth = max(depths)
-    deck = bridge.deck.thickness_m
+    depth, deck = max(depths), bridge.deck.thickness_m
+    road_depth = depth + deck + bridge.wearing_course_thickness_m
+    exposed = exposed_depth_m(road_depth, wind.solid_barrier_height_m, False)
     if wind.exposed_area_m2 is None:
-        wind.exposed_area_m2 = bridge.span_m * (depth + deck + wind.solid_barrier_height_m)
+        wind.exposed_area_m2 = bridge.span_m * exposed
     if wind.drag is None:
-        spacing = (bridge.width_m() - 2 * bridge.deck.overhang_m) / (bridge.girders.count - 1)
-        wind.drag = drag_coefficient(bridge.girders.count, spacing, depth)
+        wind.drag = service_drag_coefficient(bridge.width_m(), drag_depth_m(road_depth, wind.solid_barrier_height_m, False), wind.deck_cross_slope_deg)
     if wind.force_height_above_deck_m is None:
-        wind.force_height_above_deck_m = (wind.solid_barrier_height_m - depth) / 2 - deck / 2
+        wind.force_height_above_deck_m = exposed / 2 - depth - deck
 
 
 # Keep the specified seismic weights and coefficients when present.
@@ -193,4 +204,31 @@ def seismic_site(d):
 # Keep the shade temperatures separate from equivalent mechanical loads.
 def temperature_site(d):
     weather = d[C.KEY_PROJECT_LOCATION]["weather_data"]
-    return TemperatureSite(float(weather["max_temp"]), float(weather["min_temp"]))
+    return TemperatureSite(float(weather["max_temp"]), float(weather["min_temp"]), snowbound=bool(d[C.KEY_TL_SNOWBOUND]))
+
+
+# The construction loads on the bare steel when the construction stage is included; IRC gives no values, so they must be entered.
+def construction_loads(d):
+    if d[C.KEY_DS_CONSTRUCTION_STAGE] != "Yes":
+        return None
+    values = {}
+    for key, name in ((C.KEY_DS_SHUTTERING_LOAD, "shuttering"), (C.KEY_DS_CONSTRUCTION_LIVE_LOAD, "construction live load")):
+        if d.get(key) in (None, ""):
+            raise ValueError(f"{key}: enter the {name} on the bare steel in kN/m2 from the construction programme (0 if none); "
+                             "IRC:6 cl. 218 gives no value. Or set Construction Stages to No")
+        values[name] = float(d[key])
+    return ConstructionLoads(values["shuttering"], values["construction live load"])
+
+
+# Seismic during construction with importance factor 1 (IRC:SP:114 cl. 4.5 note), the coefficients worked out as for the bridge.
+def construction_seismic_site(d):
+    if seismic_site(d) is None:
+        return None
+    one = dict(d)
+    one[C.KEY_SL_IMPORTANCE_FACTOR] = 1.0
+    for key in (C.KEY_SL_HORIZONTAL_COEFF, C.KEY_SL_VERTICAL_COEFF):
+        if key in one:
+            one[key] = float(one[key]) / float(d[C.KEY_SL_IMPORTANCE_FACTOR])
+    site = seismic_site(one)
+    site.dead_weight_kn = site.live_weight_kn = None
+    return site

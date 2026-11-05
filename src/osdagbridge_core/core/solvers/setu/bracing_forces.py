@@ -26,12 +26,22 @@ def pair_name(pair_index):
     return f"G{pair_index + 1}-G{pair_index + 2}"
 
 
+# Each member's ULS values by limit state: the IRC traffic analysis, then Class SV (cl. 204.5) and the construction stage on the bare
+# steel (cl. 218, Table B.2) where they were analysed.
+def member_value_sets(engine):
+    sets = [(engine.brace_values.members, ultimate_limit_states(engine))]
+    if engine.special_vehicle is not None:
+        sets.append((engine.special_vehicle.braces, ["ultimate, basic"]))
+    if engine.construction is not None:
+        sets.append((engine.construction.braces, ["ultimate, construction", "ultimate, seismic during construction"]))
+    return sets
+
+
 # Every governing ULS axial force (kN, tension positive) of these roles in one pair at these stations.
 def governing_forces(engine, pair_index, stations, roles):
-    states = ultimate_limit_states(engine)
-    return [value for (pair, station, role), by_state in engine.brace_values.members.items()
+    return [value for members, states in member_value_sets(engine) for (pair, station, role), by_state in members.items()
             if pair == pair_index and station in stations and role in roles
-            for state in states for value in by_state[state].values()]
+            for state in states for value in by_state.get(state, {}).values()]
 
 
 # Tension and compression of one member kind in OsdagBridge's keys: compression as a magnitude, None when negligible.

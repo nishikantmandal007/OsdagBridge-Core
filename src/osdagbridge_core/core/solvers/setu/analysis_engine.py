@@ -6,7 +6,9 @@ from setu.postprocess.own_process import solve_in_own_process
 from osdagbridge_core.core.bridge_types.plate_girder.designer import BridgeConfig
 from osdagbridge_core.core.utils import common as C
 from osdagbridge_core.core.utils.logger import bridge_logger
-from .bridge_input import bridge_input, estimated_peak_gb, fill_unequal_depth_wind, normalise_gui_bracing, reconcile_layout, seismic_site, temperature_site, wind_site, workers_that_fit
+from setu.irc6.wind import design_wind_speed_mps, wind_pressure_pa
+from .bridge_input import (bridge_input, construction_loads, construction_seismic_site, estimated_peak_gb, fill_unequal_depth_wind, normalise_gui_bracing,
+                           reconcile_layout, seismic_site, temperature_site, wind_site, workers_that_fit)
 from .girder_demands import case_demand, deflections_cache, girder_demands
 from .live_load_report import live_load_report_values
 from .plot_dataset import CaseForces, load_states, member_nodes, plot_dataset
@@ -43,11 +45,19 @@ def plan_run(d):
 
 
 # The whole analysis in its own process: Stop ends it at once and its memory returns to the system when it finishes.
-def solve(bridge_in, wind, seismic, temperature, braking_height_m, workers):
+def solve(bridge_in, wind, seismic, temperature, braking_height_m, workers, **extras):
     values, forces = solve_in_own_process(
         bridge_in, wind, seismic, temperature, braking_height_m, workers=workers,
-        phase=lambda text: bridge_logger.sub_step(f"setu: {text}"), check=bridge_logger.check_cancel)
+        phase=lambda text: bridge_logger.sub_step(f"setu: {text}"), check=bridge_logger.check_cancel, **extras)
     return values, report_forces(forces)
+
+
+# The design wind speed and pressure at the top of the superstructure (cl. 209.3, 209.3.5 as amended) for the report's wind table.
+def wind_report(wind):
+    if wind is None:
+        return {}
+    speed = design_wind_speed_mps(wind, wind.superstructure_top_m, wind.return_period_years)
+    return {C.KEY_WL_HOURLY_MEAN_WIND: round(speed, 2), C.KEY_WL_HOURLY_WIND_PRESSURE: round(wind_pressure_pa(speed), 2)}
 
 
 # The wind and seismic forces the report's load tables print.
@@ -103,13 +113,19 @@ class SetuAnalysisEngine:
         self.temperature = temperature_site(bridge.input_dict)
         start = perf_counter()
         workers = plan_run(bridge.input_dict)
-        values, self.report_forces = solve(self.bridge_input, self.wind, self.seismic, self.temperature, float(bridge.input_dict[C.KEY_LL_ECCENTRICITY]), workers)
+        d = bridge.input_dict
+        values, self.report_forces = solve(self.bridge_input, self.wind, self.seismic, self.temperature, float(d[C.KEY_LL_ECCENTRICITY]), workers,
+                                           special_vehicle=bool(d[C.KEY_LL_IRC_CLASS_SV]), construction=construction_loads(d),
+                                           construction_seismic=construction_seismic_site(d))
+        self.report_forces.update(wind_report(self.wind))
         self.design_values, self.brace_values, self.diagrams = values.girders, values.braces, values.diagrams
+        self.special_vehicle, self.construction = values.special_vehicle, values.construction
         self.analysis_seconds = perf_counter() - start
         self.configs = [BridgeConfig.from_plate_girder_bridge(bridge, g) for g in range(bridge._girder_count())]
         self.deflections_cache = deflections_cache(self.design_values, self.configs[0])
         self.per_girder_demands, self.per_girder_per_lc = girder_demands(
-            self.design_values, self.configs, self.deflections_cache, self.seismic is not None, bridge.input_dict[C.KEY_LL_IRC_CLASS_FATIGUE])
+            self.design_values, self.configs, self.deflections_cache, self.seismic is not None, bridge.input_dict[C.KEY_LL_IRC_CLASS_FATIGUE],
+            self.special_vehicle, self.construction)
         bridge._deflections_cache = self.deflections_cache
         self.model = NoGrillageElements()
         self._deduplicated_results = plot_dataset(values, bridge.get_edge_dist())
@@ -135,6 +151,11 @@ def run_analysis(bridge):
     bridge_logger.sub_step(f"setu: analysis finished in {bridge.grillage_model.analysis_seconds:.0f} s")
     bridge.output_dict.update(live_load_report_values(bridge.grillage_model.bridge_input.span_m))
     bridge.output_dict.update(bridge.grillage_model.report_forces)
-    for note in ("Class SV and Class 70R Bogie are not analysed: these results leave them out", *bridge.grillage_model.simplifications):
+    bridge.output_dict[C.KEY_ANALYSIS_MESH] = bridge.input_dict[C.KEY_ANALYSIS_MESH]
+    governed = [name for name, demand in bridge.grillage_model.per_girder_demands.items() if "special vehicle" in demand.governing_combination]
+    if governed:
+        bridge.grillage_model.simplifications.append(
+            f"Class SV governs the ULS moment of {', '.join(governed)}: the plotted load states and case bars show the IRC traffic only")
+    for note in bridge.grillage_model.simplifications:
         bridge_logger.warning(f"setu: {note}")
     bridge.output_dict["setu_simplifications"] = bridge.grillage_model.simplifications

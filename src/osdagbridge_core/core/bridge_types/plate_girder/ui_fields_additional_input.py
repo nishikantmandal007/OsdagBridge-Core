@@ -559,6 +559,17 @@ _LIVE_LOAD_TAB_SCHEMA = {
             ],
         },
 
+        # ── Column 0: Site conditions (setu engine) ───────────────────────────
+        {
+            "column": 0,
+            "title":  "Site Conditions (IRC 6 with Amendment 10; setu engine)",
+            "rows": [
+                {"fields": [{"id": KEY_LL_ROAD_CATEGORY, "label": "Road category", "type": TYPE_COMBOBOX, "choices": [ROAD_SV_REQUIRED, ROAD_SV_OPTIONAL]}]},
+                {"fields": [{"id": KEY_LL_CONGESTION, "label": "Congestion of heavy vehicles (cl. 204.4)", "type": TYPE_CHECKBOX, "label_first": True}]},
+                {"fields": [{"id": KEY_LL_CROWD_LOAD, "label": "Crowd load likely (cl. 206.1)", "type": TYPE_CHECKBOX, "label_first": True}]},
+            ],
+        },
+
         # ── Column 0: Custom Vehicle ────────────────────────────────────────
         # {
         #     "column": 0,
@@ -633,6 +644,10 @@ _LIVE_LOAD_TAB_SCHEMA = {
                 "Braking forces are derived from the live load. For single- or two-lane bridges: 20% of the first train of load plus 10% of succeeding trains in one lane.\nFor bridges with more than two lanes: as above for the first two lanes, plus 5% for each additional lane.\nClass SV does not require a braking load by default, but a checkbox is provided if the user wishes to include it.\n\n"
                 "Braking Load Eccentricity:\n"
                 "As per IRC 6, braking load acts as a horizontal longitudinal force applied at 1.2 m above the top of the deck surface.\n\n"
+                "Site conditions (setu engine):\n"
+                "Class SV is required for all new bridges except over rural, district and village roads (cl. 201.1 as amended). "
+                "Congestion multiplies the vehicles by Table 7 where the authority decides (cl. 204.4). "
+                "Crowd load raises footways to 5 kN/m² and adds the whole deck crowded (cl. 206.1). Class AA was deleted by Amendment 10.\n\n"
                 "Footpath Pressure:\n"
                 "Footpath live load is applied as a uniform pressure per IRC 6. The default value follows the code; the user can switch to 'User-defined' to enter a custom value."
             ),
@@ -864,13 +879,28 @@ _WIND_LOAD_TAB_SCHEMA = {
             ],
         },
 
+        # ── Column 0: IRC 6 Amendment 10 wind (setu engine) ─────────────────
+        {
+            "column": 0,
+            "title":  "IRC 6 Amendment 10 Wind (setu engine)",
+            "rows": [
+                {"fields": [{"id": KEY_WL_TERRAIN_CATEGORY, "label": "Terrain Category (Table 2)", "type": TYPE_COMBOBOX, "choices": list(TERRAIN_CATEGORIES), "on_change_compute": {"function": "_compute_wind_values"}}]},
+                {"fields": [{"id": KEY_WL_RETURN_PERIOD, "label": "Return Period of Wind (years, Table 1)", "type": TYPE_COMBOBOX, "choices": list(RETURN_PERIODS), "on_change_compute": {"function": "_compute_wind_values"}}]},
+                {"fields": [{"id": KEY_WL_ROAD_LEVEL, "label": "Road Level above Mean Retarding Surface (m)", "type": TYPE_TEXTBOX, "on_change_compute": {"function": "_compute_wind_values"}}]},
+                {"fields": [{"id": KEY_WL_PIER_HEIGHT, "label": "Pier Height, Cap Top to Foundation Top (m)", "type": TYPE_TEXTBOX, "on_change_compute": {"function": "_compute_wind_values"}}]},
+                {"fields": [{"id": KEY_WL_K3_LOCATION, "label": "Topography (k<sub>3</sub>, cl. 209.3.3)", "type": TYPE_COMBOBOX, "choices": [K3_OTHER, K3_VALLEY_OR_LEEWARD], "on_change_compute": {"function": "_compute_wind_values"}}]},
+                {"fields": [{"id": KEY_WL_CYCLONIC_REGION, "label": "Cyclonic Region (k<sub>4</sub>, cl. 209.3.4)", "type": TYPE_COMBOBOX, "choices": [K4_OTHER, K4_CYCLONE_COAST, K4_OFFSHORE], "on_change_compute": {"function": "_compute_wind_values"}}]},
+                {"fields": [{"id": KEY_WL_CROSS_SLOPE, "label": "Deck Cross Slope (degrees, Table 8 note 7)", "type": TYPE_TEXTBOX, "on_change_compute": {"function": "_compute_wind_values"}}]},
+            ],
+        },
+
         # ── Column 0: Computed Values ──────────────────────────────────────
         {
             "column": 0,
             "title":  "Computed Values",
             "rows": [
-                {"fields": [{"id": KEY_WL_HOURLY_MEAN_WIND,        "label": "Hourly Mean Wind Speed, V<sub>z</sub> (m/s)",                    "type": TYPE_TEXTBOX, "read_only": True, }]},
-                {"fields": [{"id": KEY_WL_HOURLY_WIND_PRESSURE,    "label": "Hourly Wind Pressure, P<sub>z</sub> (N/m²)",                     "type": TYPE_TEXTBOX, "read_only": True, }]},
+                {"fields": [{"id": KEY_WL_HOURLY_MEAN_WIND,        "label": "Wind Speed, V<sub>z</sub> (m/s; setu: 3 s gust at the superstructure top)",                    "type": TYPE_TEXTBOX, "read_only": True, }]},
+                {"fields": [{"id": KEY_WL_HOURLY_WIND_PRESSURE,    "label": "Wind Pressure, P<sub>z</sub> (N/m²)",                     "type": TYPE_TEXTBOX, "read_only": True, }]},
                 # {"fields": [{"id": KEY_WL_TRANSVERSE_WIND_FORCE,   "label": "Transverse Wind Force, F<sub>T</sub> (N)",                       "type": TYPE_TEXTBOX, "read_only": True, }]},
                 # {"fields": [{"id": KEY_WL_LONGITUDINAL_WIND_FORCE, "label": "Longitudinal Wind Force, F<sub>L</sub> (N)",                     "type": TYPE_TEXTBOX, "read_only": True, }]},
                 # {"fields": [{"id": KEY_WL_VERTICAL_WIND_FORCE,     "label": "Vertical Wind Force, F<sub>V</sub> (N)",                         "type": TYPE_TEXTBOX, "read_only": True, }]},
@@ -887,6 +917,11 @@ _WIND_LOAD_TAB_SCHEMA = {
             "title":   "Wind Load (WL)",
             "text":    (
                 "Basic wind speed is auto-filled from the project location.\n\n"
+                "The setu engine follows cl. 209 as replaced by Amendment 10: Vz = Vb k1 k2 k3 k4 with the terrain category (Table 2), "
+                "return period (Table 1), topography and cyclonic region; Average Exposed Height is the average height of the top of the "
+                "superstructure above the mean retarding surface. Type of Terrain and Site Topography are the ospgrillage engine's inputs.\n\n"
+                "Table 2: TC 1 open sea-coasts and flat plains without trees; TC 2 airfields, open park lands, sparsely built-up outskirts; "
+                "TC 3 well wooded areas, towns and industrial areas; TC 4 large city centres with obstructions above 25 m.\n\n"
                 "Hourly mean wind speed (Vz) and design wind pressure (Pz) are computed from the basic wind speed, average exposed height (H), terrain type, and site topography per IRC 6.\n\n"
                 "Wind forces computed per IRC 6 include:\n"
                 "- Transverse wind force on the structure\n"
@@ -940,6 +975,7 @@ _TEMPERATURE_LOAD_TAB_SCHEMA = {
                 },
                 {"fields": [{"id": KEY_TL_THERMAL_COEFF_STEEL, "label": "Coefficient of Thermal Expansion for Steel (&#xD7;10<sup>-6</sup>/°C)", "type": TYPE_TEXTBOX, "read_only": True, "placeholder": "e.g. 11.7",        }]},
                 {"fields": [{"id": KEY_TL_THERMAL_COEFF_RCC,   "label": "Coefficient of Thermal Expansion for RCC (&#xD7;10<sup>-6</sup>/°C)",   "type": TYPE_TEXTBOX, "read_only": True, "placeholder": "e.g. 11.7",        }]},
+                {"fields": [{"id": KEY_TL_SNOWBOUND, "label": "Snowbound Region (cl. 215.2; setu engine)", "type": TYPE_CHECKBOX, "label_first": True}]},
             ],
         },
 
@@ -1271,6 +1307,7 @@ DESIGN_OPTIONS_SCHEMA = {
                         "on_change": "on_analysis_engine_changed",
                     }]
                 },
+                {"fields": [{"id": KEY_ANALYSIS_MESH, "label": "Mesh (setu)", "type": TYPE_COMBOBOX, "choices": list(MESH_PRESETS)}]},
             ],
         },
         {
@@ -1279,8 +1316,12 @@ DESIGN_OPTIONS_SCHEMA = {
             "title":  "Analysis Engine",
             "text":   (
                 "Selects the solver that produces the analysis results used for design, reports and plots.\n\n"
-                "setu always searches Class A, Class AA and Class 70R (Wheeled, Tracked) and does not analyse "
-                "Class SV or Class 70R Bogie, so those Live Load boxes are set and locked while it is selected."
+                "setu follows IRC:6-2017 with Amendment 10: it always searches Class A and Class 70R (Wheeled, Tracked, single axle "
+                "and Bogie), analyses Class SV when ticked, and leaves out Class AA (deleted by Amendment 10) and braking with Class SV "
+                "(cl. 204.5.4), so those Live Load boxes are set and locked while it is selected.\n\n"
+                "Mesh (setu): Fast, Standard or Fine set the element length along the span (3.0 / 1.5 / 0.75 m, shorter at the bearings). "
+                "Measured on a 35 m bridge against a very fine mesh: Fast about 2% low on brace forces, Standard within 1%, Fine within 0.3%; "
+                "Fine takes about 2.5 times as long as Standard. The report states the mesh used."
             ),
         },
 
@@ -1298,6 +1339,8 @@ DESIGN_OPTIONS_SCHEMA = {
                         
                     }]
                 },
+                {"fields": [{"id": KEY_DS_SHUTTERING_LOAD, "label": "Shuttering on the Bare Steel (kN/m², setu)", "type": TYPE_TEXTBOX, "placeholder": "from the construction programme"}]},
+                {"fields": [{"id": KEY_DS_CONSTRUCTION_LIVE_LOAD, "label": "Construction Live Load (kN/m², setu)", "type": TYPE_TEXTBOX, "placeholder": "from the construction programme"}]},
             ],
         },
 

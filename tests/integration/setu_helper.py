@@ -18,10 +18,8 @@ def default_input():
     return d
 
 
-# Explicitly deselect the two vehicle families setu cannot analyse.
+# The defaults plus the construction loads the engineer must enter (test values, kN/m2).
 def supported_input():
     d = default_input()
-    d[C.KEY_LL_IRC_CLASS_SV] = False
-    d[C.KEY_BL_IRC_CLASS_SV] = False
-    d[C.KEY_LL_IRC_70R_BOGIE] = False
+    d[C.KEY_DS_SHUTTERING_LOAD], d[C.KEY_DS_CONSTRUCTION_LIVE_LOAD] = 0.5, 1.5
     return d
