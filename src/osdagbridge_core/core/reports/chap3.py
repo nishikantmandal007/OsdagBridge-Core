@@ -43,6 +43,7 @@ from osdagbridge_core.core.utils.common import (
     KEY_TL_BRIDGE_TEMP_MIN,
     KEY_TL_HIGHEST_MAX_TEMP,
     KEY_TL_LOWEST_MIN_TEMP,
+    KEY_TL_SNOWBOUND,
     KEY_TL_TEMP_FALL,
     KEY_TL_TEMP_RISE,
     KEY_WC_LD_LANE_TABLE_COUNT,
@@ -71,11 +72,14 @@ from osdagbridge_core.core.reports.report_utils import (
 )
 
 def _analysis_notes(output_dict):
-    """What the setu engine did not follow, stated in the report; empty for ospgrillage."""
+    """What the setu engine assumed or did not follow, stated in the report; empty for ospgrillage."""
     notes = (output_dict or {}).get("setu_simplifications")
     if notes is None:
         return ""
-    items = ["Class SV and Class 70R Bogie are not analysed: these results leave them out.", *(f"{note}." for note in notes)]
+    items = [
+        "Wind site defaults (terrain category 2, 100-year return period, road level 10 m, pier height 10 m, k3 = 1.0, k4 = 1.0, cross slope 0 deg) are placeholders that the engineer must set for the site.",
+        *(f"{note}." for note in notes),
+    ]
     return "\n\\vspace{1em}\n\\noindent\\textbf{Analysis notes (setu engine)}\n\\begin{itemize}\n" + "\n".join(f"\\item {item}" for item in items) + "\n\\end{itemize}\n"
 
 
@@ -304,7 +308,7 @@ def ch3_loads(input_dict, output_dict=None):
                      or input_dict.get('shade_temp_min'))
             if _tmax and _tmin:
                 _res    = IRC6_2017.cl_215_2_effective_bridge_temperature(
-                              float(_tmax), float(_tmin), 'metallic', False)
+                              float(_tmax), float(_tmin), 'metallic', bool(input_dict.get(KEY_TL_SNOWBOUND)))
                 _bt_min = _res.get('T_min', 0)
                 _bt_max = _res.get('T_max', 0)
                 _mean   = (_bt_max + _bt_min) / 2.0

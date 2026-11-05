@@ -13,7 +13,7 @@ from osdagbridge_core.core.bridge_types.plate_girder.plategirderbridge import Pl
 from osdagbridge_core.core.bridge_types.plate_girder.designer import (
     BridgeConfig, DemandEnvelope, _extract_demands_from_result_data, apply_camber_to_deflections_cache)
 from osdagbridge_core.core.bridge_types.plate_girder.results_data import build_deflections_cache
-from osdagbridge_core.core.solvers.setu.analysis_engine import SetuAnalysisEngine
+from osdagbridge_core.core.solvers.setu.analysis_engine import SetuAnalysisEngine, temperature_report
 from osdagbridge_core.core.solvers.setu.unsupported_inputs import check_capability, simplifications
 from osdagbridge_core.core.solvers.setu.girder_demands import girder_demands, raw_deflections
 from setu import MeshSettings
@@ -194,8 +194,14 @@ def test_site_mapping():
     custom = seismic_site(d)
     assert (custom.horizontal_coefficient, custom.vertical_coefficient, custom.dead_weight_kn, custom.live_weight_kn) == (0.15, 0.1, 1000, 200)
     assert vars(temperature_site(d)) == {"shade_max_c": 40.0, "shade_min_c": 15.0, "snowbound": False}
+    assert temperature_report(temperature_site(d)) == {
+        C.KEY_TL_BRIDGE_TEMP_MIN: "5.00", C.KEY_TL_BRIDGE_TEMP_MAX: "55.00",
+        C.KEY_TL_TEMP_RISE: "25.00", C.KEY_TL_TEMP_FALL: "25.00"}
     d[C.KEY_TL_SNOWBOUND] = True
     assert temperature_site(d).snowbound
+    assert temperature_report(temperature_site(d)) == {
+        C.KEY_TL_BRIDGE_TEMP_MIN: "-35.00", C.KEY_TL_BRIDGE_TEMP_MAX: "50.00",
+        C.KEY_TL_TEMP_RISE: "42.50", C.KEY_TL_TEMP_FALL: "42.50"}
 
 
 @pytest.mark.parametrize("key,value", [("loading.live_load.irc.class_b", True)])
