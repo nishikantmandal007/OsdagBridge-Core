@@ -35,21 +35,27 @@ def load_states(values):
         states[f"Case G{girder + 1} {response}, {adverse}"] = forces
     for name, forces in diagrams.wind.items():
         states[f"WL {name}"] = forces
-    for prefix, (targets, forces) in distinct_governing_states(diagrams.governing).items():
-        states[f"{prefix}: {'; '.join(targets)}"] = forces
+    for name, (forces, _) in governing_states(diagrams).items():
+        states[name] = forces
     return states
+
+
+# Each distinct governing state by its load case name: its girder forces and its brace members' axial forces.
+def governing_states(diagrams):
+    return {f"{prefix}: {'; '.join(targets)}": (forces, braces) for prefix, (targets, forces, braces) in distinct_governing_states(diagrams.governing).items()}
 
 
 # Identical solved states named once per limit state, listing every girder value they govern.
 def distinct_governing_states(governing):
     by_forces = {}
     for (girder, response, limit_state, adverse), diagram in governing.items():
-        key = (limit_state, b"".join(forces_bytes(diagram.forces[g]) for g in sorted(diagram.forces)))
-        targets, _ = by_forces.setdefault(key, ([], diagram.forces))
+        braces = diagram.brace_forces_kn
+        key = (limit_state, b"".join(forces_bytes(diagram.forces[g]) for g in sorted(diagram.forces)), None if braces is None else braces.tobytes())
+        targets, _, _ = by_forces.setdefault(key, ([], diagram.forces, braces))
         targets.append(f"G{girder + 1} {response}, {adverse} ({diagram.governing.combination})")
     counts = dict.fromkeys(COMBINATION_PREFIX.values(), 0)
     named = {}
-    for (limit_state, _), state in by_forces.items():
+    for (limit_state, _, _), state in by_forces.items():
         prefix = COMBINATION_PREFIX[limit_state]
         counts[prefix] += 1
         named[f"{prefix}{counts[prefix]}"] = state

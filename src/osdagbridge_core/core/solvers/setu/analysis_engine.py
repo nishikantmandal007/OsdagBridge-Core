@@ -154,7 +154,8 @@ class SetuAnalysisEngine:
     # Girder and deck design only need the canonical girder labels here.
     def get_result_data(self):
         return DesignResultData(girders={name: {} for name in self.per_girder_demands}, members=member_nodes(self._deduplicated_results),
-                                forces=CaseForces(self._deduplicated_results))
+                                forces=CaseForces(self._deduplicated_results),
+                                loadcases=[str(name) for name in self._deduplicated_results.Loadcase.values])
 
     # ospgrillage's load-case objects and live model access are not part of the setu engine.
     def __getattr__(self, name):

@@ -1416,7 +1416,7 @@ class EndDiaphragmForces:
                 pair_forces = self.get_pair_forces(pair, cos_alpha)
                 # Fallback to CrossBracingForces if edge elements yield no forces
                 if not any(v is not None for k, v in pair_forces.items() if k.endswith("_kN")):
-                    cb = CrossBracingForces(bridge=bridge)
+                    cb = bridge.cross_bracing_forces() if hasattr(bridge, "cross_bracing_forces") else CrossBracingForces(bridge=bridge)
                     cb_forces = cb.get_design_forces_dict()
                     fallback_pair_forces = (cb_forces.get("pairs") or {}).get(pair)
                     if fallback_pair_forces:

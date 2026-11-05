@@ -605,13 +605,35 @@ def test_independent_edge_uls(setu_bridge):
     assert actual == pytest.approx(expected, rel=0.15)
 
 
+# The Transverse Member Design dialog's per-load-case table: each governing state's brace forces, which are the replay's own solves.
+# Per pair and load case, the table's largest and smallest diagonal and chord forces are those of the members at the intermediate stations.
+def test_per_load_case_brace_forces(setu_bridge):
+    from osdagbridge_core.core.solvers.setu.bracing_forces import CHORDS, DIAGONALS, intermediate_stations, pair_name
+    from osdagbridge_core.core.solvers.setu.plot_dataset import governing_states
+    engine = setu_bridge.grillage_model
+    states = governing_states(engine.diagrams)
+    table = setu_bridge.cross_bracing_forces().compute_panel_forces()
+    assert set(table["LoadCase"]) == set(states)
+    assert set(states) <= set(engine.get_result_data()["loadcases"])
+    members = engine.diagrams.brace_members
+    stations = intermediate_stations(engine)
+    for name, (_, braces) in states.items():
+        assert len(braces) == len(members)
+        for pair in range(engine.bridge_input.girders.count - 1):
+            rows = table[(table["LoadCase"] == name) & (table["Girder Pair"] == pair_name(pair))]
+            for roles, column in ((DIAGONALS, "F_diag (kN)"), (CHORDS, "F_chord (kN)")):
+                forces = [braces[k] for k, (p, station, role) in enumerate(members) if p == pair and station in stations and role in roles]
+                assert rows[column].max() == max(forces) and rows[column].min() == min(forces)
+
+
 # Grillage-only records and attributes are refused by name; the results dataset and the tables built from it are setu's.
 def test_engine_boundaries(setu_bridge):
     engine = setu_bridge.grillage_model
     data = engine.get_result_data()
     assert data["girders"] == {f"G{g + 1}": {} for g in range(4)}
     assert data["members"] and data["forces"].get("1.0 DL") and data["forces"].get("no such case", {}) == {}
-    for key in ("crossbracings", "nodes", "displacements", "loadcases"):
+    assert data["loadcases"] == [str(name) for name in engine._deduplicated_results.Loadcase.values]
+    for key in ("crossbracings", "nodes", "displacements"):
         with pytest.raises(NotImplementedError, match="not provided by the setu engine"):
             data[key]
         with pytest.raises(NotImplementedError, match="not provided by the setu engine"):
