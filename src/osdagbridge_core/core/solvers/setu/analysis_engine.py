@@ -12,6 +12,7 @@ from .bridge_input import (bridge_input, construction_loads, construction_seismi
                            reconcile_layout, seismic_site, temperature_site, wind_site, workers_that_fit)
 from .girder_demands import case_demand, deflections_cache, girder_demands
 from .live_load_report import live_load_report_values
+from .run_progress import RunProgress
 from .plot_dataset import CaseForces, load_states, member_nodes, plot_dataset
 from .unsupported_inputs import check_capability, simplifications
 
@@ -34,20 +35,6 @@ def available_memory_gb():
     return None
 
 
-# Progress percentage within Stage 4G (between Stage 2 at 14% and Stage 4G complete at 71%) for each setu phase.
-PHASE_PROGRESS_PCT = {
-    "building the model and solving the dead load stages": 20,
-    "factorising the stiffness matrix": 28,
-    "solving and searching the girders": 38,
-    "searching the girders": 38,
-    "solving and searching the braces": 48,
-    "searching the braces": 48,
-    "solving and searching the Class SV": 56,
-    "the construction stage on the bare steel": 62,
-    "replaying the governing load states": 66,
-}
-
-
 # Say how big the run is, warn if it may not fit, and choose the workers that do.
 def plan_run(d):
     nodes, gb = estimated_peak_gb(d)
@@ -60,19 +47,13 @@ def plan_run(d):
     return workers
 
 
-# Log one setu phase and advance the progress bar.
-def report_phase(text):
-    pct = PHASE_PROGRESS_PCT.get(text)
-    if pct is not None:
-        bridge_logger._emit(f"__progress__{pct}", "progress")
-    bridge_logger.sub_step(f"setu: {text}")
-
-
 # The whole analysis in its own process: Stop ends it at once and its memory returns to the system when it finishes.
 def solve(bridge_in, wind, seismic, temperature, braking_height_m, workers, **extras):
+    tracker = RunProgress(extras.get("special_vehicle", False), extras.get("construction") is not None)
     values, forces = solve_in_own_process(
         bridge_in, wind, seismic, temperature, braking_height_m, workers=workers,
-        phase=report_phase, check=bridge_logger.check_cancel, **extras)
+        phase=tracker.phase, progress=tracker.counts, check=bridge_logger.check_cancel, **extras)
+    tracker.finish()
     return values, report_forces(forces)
 
 
