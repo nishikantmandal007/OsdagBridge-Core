@@ -806,3 +806,18 @@ def test_figures_render(setu_geometry):
     for key in engine.get_girder_keys():
         assert engine.extract_member_results(key, "1.0 LL") is not None
     plt.close("all")
+
+
+# A congested or crowd placement takes no braking (IRC:6 cl. 204.4), so setu gives no braking diagram where one governs:
+# the load states and the plot dataset are built without a braking state.
+def test_load_states_without_braking(setu_bridge):
+    import copy
+    from types import SimpleNamespace
+    from osdagbridge_core.core.solvers.setu.plot_dataset import BRAKING_CASE, LIVE_LOAD_CASE, load_states, plot_dataset
+    engine = setu_bridge.grillage_model
+    diagrams = copy.copy(engine.diagrams)
+    diagrams.braking = {}
+    values = SimpleNamespace(girders=engine.design_values, diagrams=diagrams)
+    states = load_states(values)
+    assert BRAKING_CASE not in states and LIVE_LOAD_CASE in states
+    assert BRAKING_CASE not in set(map(str, plot_dataset(values, setu_bridge.get_edge_dist()).Loadcase.values))
