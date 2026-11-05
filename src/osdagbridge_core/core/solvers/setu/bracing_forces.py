@@ -1,4 +1,8 @@
+import numpy as np
+import pandas as pd
+
 from osdagbridge_core.core.bridge_types.plate_girder.crossbracingforces import CrossBracingForces, EndDiaphragmForces
+from .plot_dataset import governing_states
 
 DIAGONALS = ("diagonal_down", "diagonal_up", "k_top_left", "k_top_right", "k_bottom_left", "k_bottom_right")
 CHORDS = ("top_chord", "bottom_chord")
@@ -73,6 +77,29 @@ class SetuCrossBracingForces(CrossBracingForces):
     def get_crossbracing_count(self):
         engine = self.bridge.grillage_model
         return len(intermediate_stations(engine)) * (engine.bridge_input.girders.count - 1)
+
+    # The per-load-case table the grillage builds from panel shears, from setu's brace member forces in each governing load state
+    # (read off the replay's own solves): for every state and pair, one row with the largest diagonal and chord force over the
+    # intermediate stations and one with the smallest, so a reader taking each pair's max and min per load case gets setu's values.
+    def compute_panel_forces(self, load_case_filter=None):
+        engine = self.bridge.grillage_model
+        diagrams = engine.diagrams
+        index = {member: k for k, member in enumerate(diagrams.brace_members)}
+        stations = intermediate_stations(engine)
+        rows = []
+        for name, (_, braces) in governing_states(diagrams).items():
+            if braces is None:
+                raise ValueError(f"{name}: setu gave no brace forces for this load state")
+            if load_case_filter and load_case_filter not in name:
+                continue
+            for pair in range(engine.bridge_input.girders.count - 1):
+                diagonals = braces[[index[member] for member in index if member[0] == pair and member[1] in stations and member[2] in DIAGONALS]]
+                chords = braces[[index[member] for member in index if member[0] == pair and member[1] in stations and member[2] in CHORDS]]
+                for pick in (np.max, np.min):
+                    rows.append({"LoadCase": name, "Girder Pair": pair_name(pair), "Vz_i (kN)": np.nan, "Vz_j (kN)": np.nan,
+                                 "F_diag (kN)": float(pick(diagonals)) if diagonals.size else np.nan,
+                                 "F_chord (kN)": float(pick(chords)) if chords.size else np.nan})
+        return pd.DataFrame(rows, columns=["LoadCase", "Girder Pair", "Vz_i (kN)", "Vz_j (kN)", "F_diag (kN)", "F_chord (kN)"])
 
     # The parent's per-pair configuration and geometry, with setu's governing forces.
     def get_design_forces_dict(self):
