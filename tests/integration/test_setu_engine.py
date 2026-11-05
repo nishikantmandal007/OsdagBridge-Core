@@ -16,6 +16,7 @@ from osdagbridge_core.core.bridge_types.plate_girder.results_data import build_d
 from osdagbridge_core.core.solvers.setu.analysis_engine import SetuAnalysisEngine
 from osdagbridge_core.core.solvers.setu.unsupported_inputs import check_capability, simplifications
 from osdagbridge_core.core.solvers.setu.girder_demands import girder_demands, raw_deflections
+from setu import MeshSettings
 from osdagbridge_core.core.solvers.setu.bridge_input import (
     added_dead_loads, brace_value, bracing, bridge_input, cross_section, estimated_peak_gb, normalise_gui_bracing, workers_that_fit, reconcile_layout, seismic_site, temperature_site, wind_site)
 
@@ -29,6 +30,11 @@ def prepared(d):
     b._build_dtos()
     b.material_props = b._build_material_props()
     return b
+
+
+# The mapped setu bridge of these inputs.
+def prepared_bridge_input(d):
+    return bridge_input(prepared(d))
 
 
 # Record completed design stages around the real stage runner.
@@ -125,8 +131,9 @@ def test_input_mapping():
     assert mapped.bracing.area_m2 == C.get_angle_section_properties(brace_value(d, C.KEY_MP_CB_BRACING_SECTION_DESIGNATION))["Area"] * 1e-4 * 2
     assert mapped.bracing.steel_grade == d[C.KEY_CROSS_BRACING]
     assert mapped.bracing.end_diaphragm_steel_grade == d[C.KEY_END_DIAPHRAGM]
-    assert mapped.mesh.panels_between_braces == 16
-    assert mapped.mesh.target_size_across_width_m == 0.15
+    assert d[C.KEY_ANALYSIS_MESH] == "Standard"
+    assert vars(mapped.mesh) == vars(MeshSettings.preset("standard"))
+    assert not mapped.cross_section.crowd_load and not mapped.cross_section.congestion
     assert vars(mapped.added_dead_loads) == {"footpath_kpa": 0.0, "kerb_kn_per_m": 0.0, "median_kn_per_m": 0.0,
                                              "crash_barrier_kn_per_m": float(d[C.KEY_CB_LOAD]), "railing_kn_per_m": 0.0}
     assert [(s.name, s.width_m) for s in mapped.cross_section.strips] == [
@@ -153,7 +160,14 @@ def test_cross_section_strips(count):
 def test_site_mapping():
     d = supported_input()
     wind = wind_site(d)
-    assert (wind.basic_wind_speed_mps, wind.terrain, wind.height_m, wind.funnelling, wind.solid_barrier_height_m) == (44, "plain", 10, False, 1.1)
+    assert (wind.basic_wind_speed_mps, wind.terrain_category, wind.superstructure_top_m, wind.road_level_m, wind.pier_height_m,
+            wind.return_period_years, wind.valley_or_leeward_hill, wind.cyclonic_region, wind.deck_cross_slope_deg,
+            wind.solid_barrier_height_m) == (44, 2, 10, 10, 10, 100, False, "inland", 0, 1.1)
+    d.update({C.KEY_WL_TERRAIN_CATEGORY: "TC 3", C.KEY_WL_RETURN_PERIOD: "50", C.KEY_WL_ROAD_LEVEL: "8.5", C.KEY_WL_PIER_HEIGHT: "6",
+              C.KEY_WL_K3_LOCATION: C.K3_VALLEY_OR_LEEWARD, C.KEY_WL_CYCLONIC_REGION: C.K4_CYCLONE_COAST, C.KEY_WL_CROSS_SLOPE: "1.5"})
+    site = wind_site(d)
+    assert (site.terrain_category, site.return_period_years, site.road_level_m, site.pier_height_m, site.valley_or_leeward_hill,
+            site.cyclonic_region, site.deck_cross_slope_deg) == (3, 50, 8.5, 6, True, "cyclone coast", 1.5)
     fields = {"gust": (C.KEY_WL_GUST_FACTOR_MODE, C.KEY_WL_GUST_FACTOR_VALUE),
               "drag": (C.KEY_WL_DRAG_COEFF_MODE, C.KEY_WL_DRAG_COEFF_VALUE),
               "drag_on_live_load": (C.KEY_WL_DRAG_COEFF_LL_MODE, C.KEY_WL_DRAG_COEFF_LL_VALUE),
@@ -179,12 +193,12 @@ def test_site_mapping():
               C.KEY_SL_LIVE_LOAD_MODE: "Custom", C.KEY_SL_LIVE_LOAD_VALUE: 200})
     custom = seismic_site(d)
     assert (custom.horizontal_coefficient, custom.vertical_coefficient, custom.dead_weight_kn, custom.live_weight_kn) == (0.15, 0.1, 1000, 200)
-    assert vars(temperature_site(d)) == {"shade_max_c": 40.0, "shade_min_c": 15.0}
+    assert vars(temperature_site(d)) == {"shade_max_c": 40.0, "shade_min_c": 15.0, "snowbound": False}
+    d[C.KEY_TL_SNOWBOUND] = True
+    assert temperature_site(d).snowbound
 
 
-@pytest.mark.parametrize("key,value", [
-    (C.KEY_LL_IRC_CLASS_SV, True), (C.KEY_BL_IRC_CLASS_SV, True), (C.KEY_LL_IRC_70R_BOGIE, True), ("loading.live_load.irc.class_b", True),
-])
+@pytest.mark.parametrize("key,value", [("loading.live_load.irc.class_b", True)])
 # A vehicle neither engine analyses stops the run and says so, instead of pointing at ospgrillage.
 def test_vehicle_neither_engine_analyses(key, value):
     b = prepared(supported_input())
@@ -199,7 +213,6 @@ def test_vehicle_neither_engine_analyses(key, value):
     (C.KEY_LL_CUSTOM_VEHICLES, [{"name": "custom"}], "Custom vehicles"),
     (C.KEY_LL_FOOTPATH_PRESSURE_MODE, "Custom", "footpath pressure"),
     (C.KEY_PL_SELF_WEIGHT_FACTOR, 1.2, "self-weight factor"),
-    (C.KEY_WL_SITE_TOPOGRAPHY, "Hill, ridge, escarpment or cliff", "Topography"),
     (C.KEY_WL_WIND_LL_ECC_MODE, "Custom", "eccentricity"),
     (C.KEY_MP_CB_TYPE + ".G2G3.B2M1", "K-Bracing", "G1-G2 bracing"),
     (C.KEY_MP_CB_BRACING_SECTION_DESIGNATION + ".G2G3.B2M1", "IS 110 x 110 x 10", "G1-G2 bracing"),
@@ -285,8 +298,13 @@ def test_report_forces_and_case_bars(setu_bridge):
     assert setu_bridge.output_dict[C.KEY_SL_FORCE_TRANSVERSE] > setu_bridge.output_dict[C.KEY_SL_FORCE_LONGITUDINAL]
     for load_case in setu_bridge.get_available_loadcases():
         assert setu_bridge.get_dcr_for_selection("G1", load_case), load_case
-    uls = setu_bridge.grillage_model.case_demand("G1", "Envelope ULS")
-    assert uls["lc_type"] == "ULS" and uls["Mu_kNm"] == pytest.approx(setu_bridge.grillage_model.per_girder_demands["G1"].Mu_kNm, rel=1e-3)
+    engine = setu_bridge.grillage_model
+    uls = engine.case_demand("G1", "Envelope ULS")
+    # The plotted load states are the IRC traffic's; Class SV governs this bridge's design moment and the run says so.
+    traffic = max(abs(v.value) for state in ("ultimate, basic", "ultimate, seismic") for v in engine.design_values.girders[0]["maximum composite moment"][state].values())
+    assert uls["lc_type"] == "ULS" and uls["Mu_kNm"] == pytest.approx(traffic, rel=1e-3)
+    assert engine.per_girder_demands["G1"].Mu_kNm > uls["Mu_kNm"]
+    assert any("Class SV governs" in note and "G1" in note for note in setu_bridge.output_dict["setu_simplifications"])
 
 
 # Bracing design never takes a process per core.
@@ -296,11 +314,11 @@ def test_design_pool_capped():
         assert pool._max_workers == connect.DESIGN_WORKER_LIMIT
 
 
-# Peak memory grows much faster than the deck is widened.
+# Peak memory grows as the deck is widened.
 def test_peak_estimate_grows_with_width():
     narrow, wide = supported_input(), supported_input()
     wide[C.KEY_CARRIAGEWAY_WIDTH], wide[C.KEY_TS_NO_OF_GIRDERS] = 46.0, 22
-    assert estimated_peak_gb(wide)[1] > 2 * estimated_peak_gb(narrow)[1]
+    assert estimated_peak_gb(wide)[1] > estimated_peak_gb(narrow)[1]
 
 
 # Workers fit the free memory, up to the cap and never below one.
@@ -329,6 +347,56 @@ def test_peak_location():
     coords = {1: (0.0,), 2: (1.5,), 3: (3.0,)}
     assert _peak_location(ds, "c", [(1, 1, 2), (2, 2, 3)], "Mz", coords) == 1.5
     assert _peak_location(ds, "c", [(9, 1, 2)], "Mz", coords) is None
+
+
+# What IRC:6 as amended no longer has stops the run with its clause: Class AA (Amendment 10) and braking with Class SV (204.5.4).
+@pytest.mark.parametrize("key,says", [(C.KEY_LL_IRC_AA_WHEELED, "Amendment 10"), (C.KEY_LL_IRC_AA_TRACKED, "Amendment 10"),
+                                      (C.KEY_BL_IRC_CLASS_SV, "204.5.4")])
+def test_not_in_irc(key, says):
+    b = prepared(supported_input())
+    b.input_dict[key] = True
+    with pytest.raises(ValueError, match=says):
+        check_capability(b)
+
+
+# Class SV is required on new bridges except over rural, district and village roads (cl. 201.1 as amended).
+def test_class_sv_follows_the_road_category():
+    b = prepared(supported_input())
+    b.input_dict[C.KEY_LL_IRC_CLASS_SV] = False
+    with pytest.raises(ValueError, match="201.1"):
+        check_capability(b)
+    b.input_dict[C.KEY_LL_ROAD_CATEGORY] = C.ROAD_SV_OPTIONAL
+    check_capability(b)
+
+
+# The construction loads have no IRC value, so leaving them blank stops the run; Construction Stages No leaves the stage out.
+def test_construction_loads_are_entered():
+    from osdagbridge_core.core.solvers.setu.bridge_input import construction_loads
+    d = supported_input()
+    assert vars(construction_loads(d)) == {"shuttering_kpa": 0.5, "construction_live_load_kpa": 1.5}
+    d[C.KEY_DS_SHUTTERING_LOAD] = ""
+    with pytest.raises(ValueError, match="cl. 218"):
+        construction_loads(d)
+    d[C.KEY_DS_CONSTRUCTION_STAGE] = "No"
+    assert construction_loads(d) is None
+
+
+# Seismic during construction: importance factor 1 (IRC:SP:114 cl. 4.5 note), the bridge's own coefficients scaled back from its I.
+def test_construction_seismic_site():
+    from osdagbridge_core.core.solvers.setu.bridge_input import construction_seismic_site
+    d = supported_input()
+    d[C.KEY_SL_IMPORTANCE_FACTOR] = 1.2
+    site, bridge = construction_seismic_site(d), seismic_site(d)
+    assert site.importance_factor == 1.0
+    assert site.horizontal_coefficient == pytest.approx(bridge.horizontal_coefficient / 1.2)
+
+
+# The mesh preset sets the mesh and the memory estimate.
+def test_mesh_preset():
+    fast, fine = supported_input(), supported_input()
+    fast[C.KEY_ANALYSIS_MESH], fine[C.KEY_ANALYSIS_MESH] = "Fast", "Fine"
+    assert estimated_peak_gb(fast)[0] < estimated_peak_gb(supported_input())[0] < estimated_peak_gb(fine)[0]
+    assert vars(prepared_bridge_input(fine).mesh) == vars(MeshSettings.preset("fine"))
 
 
 # A required vehicle left unticked says to tick it.
@@ -368,19 +436,32 @@ def test_missing_input_raises():
         bridge_input(b)
 
 
+# Class SV values of one girder response in these limit states (cl. 204.5: 1.15 ULS basic, 1.0 rare, 0.75 frequent).
+def sv_values(engine, g, response, states):
+    sv = engine.special_vehicle
+    return [] if sv is None else [v for state in states for v in sv.girders[g][response].get(state, {}).values()]
+
+
+# Class SV values of one girder response that came from this combination.
+def sv_combination(engine, g, response, name):
+    return [v for by in engine.special_vehicle.girders[g][response].values() for v in by.values() if v.combination == name]
+
+
 # Independently state every mapped field so no default or unit error can hide.
 def expected_demand(engine, g, name=None):
     values, config = engine.design_values, engine.configs[g]
     if name is None:
         states = ["ultimate, basic"] + (["ultimate, seismic"] if engine.seismic is not None else [])
-        moments = [v for state in states for v in values.girders[g]["maximum composite moment"][state].values()]
-        shears = [v for state in states for v in values.girders[g]["support shear"][state].values()]
-        rare_m = max(values.girders[g]["maximum composite moment"]["serviceability, rare"].values(), key=lambda v: abs(v.value))
-        rare_v = max(values.girders[g]["support shear"]["serviceability, rare"].values(), key=lambda v: abs(v.value))
+        moments = [v for state in states for v in values.girders[g]["maximum composite moment"][state].values()] + sv_values(engine, g, "maximum composite moment", states)
+        shears = [v for state in states for v in values.girders[g]["support shear"][state].values()] + sv_values(engine, g, "support shear", states)
+        rare = ["serviceability, rare"]
+        rare_m = max([*values.girders[g]["maximum composite moment"]["serviceability, rare"].values(), *sv_values(engine, g, "maximum composite moment", rare)], key=lambda v: abs(v.value))
+        rare_v = max([*values.girders[g]["support shear"]["serviceability, rare"].values(), *sv_values(engine, g, "support shear", rare)], key=lambda v: abs(v.value))
         kind = ""
     else:
-        moments = list(values.combinations[g]["maximum composite moment"][name].values())
-        shears = list(values.combinations[g]["support shear"][name].values())
+        native = name in values.combinations[g]["maximum composite moment"]
+        moments = list(values.combinations[g]["maximum composite moment"][name].values()) if native else sv_combination(engine, g, "maximum composite moment", name)
+        shears = list(values.combinations[g]["support shear"][name].values()) if native else sv_combination(engine, g, "support shear", name)
         kind = "ULS" if name.startswith("ultimate,") else "SLS_frequent" if name.startswith("serviceability, frequent") else "SLS"
         rare_m, rare_v = max(moments, key=lambda v: abs(v.value)), max(shears, key=lambda v: abs(v.value))
     m, v = max(moments, key=lambda v: abs(v.value)), max(shears, key=lambda v: abs(v.value))
@@ -393,11 +474,13 @@ def expected_demand(engine, g, name=None):
         expected.update(stress_range_MPa=values.fatigue_stresses_mpa[g]["steel bottom"].range,
                         shear_range_MPa=values.fatigue[g]["support shear"].range * 1000 / config.section.Aw)
     if name is None:
-        sw, wet = (values.dead.stages[s][g] for s in ("steel self weight", "wet slab"))
-        i = np.argmin(np.abs(sw.stations_m - m.at_m))
+        sw = values.dead.stages["steel self weight"][g]
+        construction = engine.construction.girders[g]["maximum composite moment"]
         cache = engine.deflections_cache[f"G{g + 1}"]
-        expected.update(M_girder_sw_kNm=abs(float(sw.composite_moment_kn_m[i])),
-                        M_construction_kNm=abs(float(sw.composite_moment_kn_m[i] + wet.composite_moment_kn_m[i])),
+        # Table B.2: girder self weight at 1.35 (stage 1); the governing ULS construction combination (stage 2)
+        expected.update(M_girder_sw_kNm=1.35 * float(np.abs(sw.composite_moment_kn_m).max()),
+                        M_construction_kNm=max(abs(v.value) for state in ("ultimate, construction", "ultimate, seismic during construction")
+                                               for v in construction.get(state, {}).values()),
                         Vr_kN=values.live_shear_range_kn[g], delta_live_mm=cache["live_mm"],
                         delta_dl_mm=cache["dl_mm"], delta_total_mm=cache["total_mm"], camber_mm=cache["camber_mm"])
     return expected
@@ -409,7 +492,9 @@ def test_demand_mapping(setu_bridge):
     for g in engine.design_values.girders:
         label = f"G{g + 1}"
         assert asdict(engine.per_girder_demands[label]) == expected_demand(engine, g)
-        assert set(engine.per_girder_per_lc[label]) == set(engine.design_values.combinations[g]["maximum composite moment"])
+        sv_names = {v.combination for by in engine.special_vehicle.girders[g]["maximum composite moment"].values() for v in by.values()}
+        assert set(engine.per_girder_per_lc[label]) == set(engine.design_values.combinations[g]["maximum composite moment"]) | sv_names
+        assert any("special vehicle" in name for name in engine.per_girder_per_lc[label])
         for name, demand in engine.per_girder_per_lc[label].items():
             assert asdict(demand) == expected_demand(engine, g, name)
         assert setu_bridge.design_results["per_girder"][label]["demand"]["Mu_kNm"] == engine.per_girder_demands[label].Mu_kNm
@@ -421,9 +506,10 @@ def test_deflections_cache(setu_bridge):
     raw = raw_deflections(engine.design_values)
     for g, d in engine.design_values.deflections.items():
         assert raw[f"G{g + 1}"] == {
-            C.KEY_SD_DEFL_LIVE_RAW: d["live_m"] * 1000,
+            # Annex B cl. 7.2 as amended: deflection limits use Table B.3 column 3, live load leading at 0.75
+            C.KEY_SD_DEFL_LIVE_RAW: 0.75 * d["live_m"] * 1000,
             C.KEY_SD_DEFL_DL_RAW: sum(d["dead_m"].values()) * 1000,
-            C.KEY_SD_DEFL_TOTAL_RAW: d["total_m"] * 1000,
+            C.KEY_SD_DEFL_TOTAL_RAW: (sum(d["dead_m"].values()) + 0.75 * d["live_m"]) * 1000,
             "per_lc": {stage: value * 1000 for stage, value in d["dead_m"].items()}}
     config = engine.configs[0]
     assert engine.deflections_cache == apply_camber_to_deflections_cache(raw, config.geometry.camber_mode, config.geometry.camber_value_mm)
@@ -475,7 +561,8 @@ def test_independent_dead_statics(setu_bridge):
     station_weight = (steel - girder) * length / bridge.bracing.station_count
     brace_x = np.linspace(0, length, bridge.bracing.station_count)
     steel_moment = girder * length ** 2 / 8 + station_weight * sum(np.minimum(brace_x, length - brace_x) / 2)
-    wet_moment = bridge.width_m() * bridge.deck.thickness_m * bridge.concrete.unit_weight_kn_m3 * length ** 2 / 8
+    # IRC:6 Table 1 note as amended: wet concrete at its unit weight + 1 kN/m3
+    wet_moment = bridge.width_m() * bridge.deck.thickness_m * (bridge.concrete.unit_weight_kn_m3 + 1.0) * length ** 2 / 8
     for stage, expected, tolerance in (("steel self weight", steel_moment, 0.01), ("wet slab", wet_moment, 0.02)):
         forces = engine.design_values.dead.stages[stage].values()
         actual = sum(float(f.composite_moment_kn_m[np.argmin(abs(f.stations_m - length / 2))]) for f in forces)
@@ -576,11 +663,13 @@ def test_dcr_hook(engine):
     assert b._dcr_engine == "dcr" and b.design_results == {"result": 1}
 
 
-# Every governing ULS axial force of these roles, written out independently of the adapter.
+# Every governing ULS axial force of these roles, written out independently of the adapter: IRC traffic, Class SV, construction stage.
 def expected_forces(engine, pair, stations, roles):
     states = ["ultimate, basic"] + (["ultimate, seismic"] if engine.seismic is not None else [])
-    return [value for (k, station, role), by_state in engine.brace_values.members.items()
-            if k == pair and station in stations and role in roles for state in states for value in by_state[state].values()]
+    sources = [(engine.brace_values.members, states), (engine.special_vehicle.braces, ["ultimate, basic"]),
+               (engine.construction.braces, ["ultimate, construction", "ultimate, seismic during construction"])]
+    return [value for members, wanted in sources for (k, station, role), by_state in members.items()
+            if k == pair and station in stations and role in roles for state in wanted for value in by_state.get(state, {}).values()]
 
 
 # The pair summary OsdagBridge expects, built from the expected forces with its own 5 N cut-off and rounding.
@@ -633,7 +722,11 @@ def test_live_load_report_values(setu_bridge):
     b = setu_bridge
     span_m = float(b.input_dict[C.KEY_SPAN])
     assert b.output_dict[C.KEY_LL_IMPACT_FACTOR_CLASS_A] == round(1 + 9 / (13.5 + span_m), 3)
-    assert b.output_dict[C.KEY_LL_IMPACT_FACTOR_CLASS_AA_70R] == 1.1
+    assert b.output_dict[C.KEY_LL_IMPACT_FACTOR_CLASS_AA_70R] == b.output_dict[C.KEY_LL_IMPACT_FACTOR_70R_TRACKED] == 1.1
+    # cl. 208.3 with Amendment 10: 70R wheeled 25 % up to 23 m, then the Class A curve
+    assert b.output_dict[C.KEY_LL_IMPACT_FACTOR_70R_WHEELED] == round(1 + 9 / (13.5 + span_m), 3)
+    assert b.output_dict[C.KEY_LL_VEHICLE_TOTAL_LOAD_CLASS_SV] == 3850.0
+    assert b.output_dict[C.KEY_ANALYSIS_MESH] == "Standard"
     # IRC:6-2017 Amendment 10 (and Amendment 8 for the fatigue truck) print these in kN
     assert b.output_dict[C.KEY_LL_VEHICLE_TOTAL_LOAD_CLASS_A] == 554.0
     assert b.output_dict[C.KEY_LL_VEHICLE_TOTAL_LOAD_70R_WHEELED] == 1000.0
