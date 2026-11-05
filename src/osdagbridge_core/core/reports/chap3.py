@@ -77,7 +77,7 @@ def _analysis_notes(output_dict):
     if notes is None:
         return ""
     items = [
-        "Wind site defaults (terrain category 2, 100-year return period, road level 10 m, pier height 10 m, k3 = 1.0, k4 = 1.0, cross slope 0 deg) are placeholders that the engineer must set for the site.",
+        "Wind site defaults (terrain category 2, 100-year return period, road level 10 m, pier height 10 m, k3 = 1.0, k4 = 1.0, cross slope 0 deg) and construction load defaults (shuttering 0 kN/m2, construction live load 0 kN/m2) are placeholders that the engineer must set for the site.",
         *(f"{note}." for note in notes),
     ]
     return "\n\\vspace{1em}\n\\noindent\\textbf{Analysis notes (setu engine)}\n\\begin{itemize}\n" + "\n".join(f"\\item {item}" for item in items) + "\n\\end{itemize}\n"
