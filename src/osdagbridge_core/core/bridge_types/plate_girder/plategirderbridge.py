@@ -2515,6 +2515,14 @@ class PlateGirderBridge:
         # Log the girder verdict (reads it from output_dict)
         bridge_logger.girder_verdict(self.output_dict)
 
+    def cross_bracing_forces(self):
+        """The cross-bracing force reader for this bridge's analysis engine: setu's member forces or the grillage's panel shears."""
+        from osdagbridge_core.core.bridge_types.plate_girder.crossbracingforces import CrossBracingForces
+
+        if self.input_dict[KEY_ANALYSIS_ENGINE] == ENGINE_SETU:
+            from osdagbridge_core.core.solvers.setu.bracing_forces import SetuCrossBracingForces as CrossBracingForces
+        return CrossBracingForces(bridge=self)
+
     def _design_cross_bracing_members(self) -> dict:
         """
         Run Osdag member designs for cross-bracing diagonals and chords.
@@ -2523,12 +2531,7 @@ class PlateGirderBridge:
         -------
         dict — nested by pair → member → force_type → Osdag result.
         """
-        from osdagbridge_core.core.bridge_types.plate_girder.crossbracingforces import CrossBracingForces
-
-        if self.input_dict[KEY_ANALYSIS_ENGINE] == ENGINE_SETU:
-            from osdagbridge_core.core.solvers.setu.bracing_forces import SetuCrossBracingForces as CrossBracingForces
-        cb = CrossBracingForces(bridge=self)
-        return cb.design()
+        return self.cross_bracing_forces().design()
 
     def _design_end_diaphragm_members(self) -> dict:
         """
