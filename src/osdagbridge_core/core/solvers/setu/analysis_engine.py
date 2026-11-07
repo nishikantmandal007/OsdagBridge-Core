@@ -1,3 +1,4 @@
+import multiprocessing
 import os
 import sys
 from time import perf_counter
@@ -9,7 +10,7 @@ from osdagbridge_core.core.utils.logger import bridge_logger
 from setu.irc6.temperature import effective_temperature_range
 from setu.irc6.wind import design_wind_speed_mps, wind_pressure_pa
 from .bridge_input import (bridge_input, construction_loads, construction_seismic_site, estimated_peak_gb, fill_unequal_depth_wind, normalise_gui_bracing,
-                           reconcile_layout, seismic_site, temperature_site, wind_site, workers_that_fit)
+                           reconcile_layout, seismic_site, temperature_site, wind_site, worker_gb, workers_that_fit)
 from .girder_demands import case_demand, deflections_cache, girder_demands
 from .live_load_report import live_load_report_values
 from .run_progress import RunProgress
@@ -17,8 +18,9 @@ from .plot_dataset import CaseForces, load_states, member_nodes, plot_dataset
 from .unsupported_inputs import check_capability, simplifications
 
 
-# Workers forked after the factor exists read one copy of it, so they cost far less than separate models.
-MOST_WORKERS = min(4, max(1, (os.cpu_count() or 2) - 1))
+# One core is left for this process, which combines what the workers send back; memory sets the rest (workers_that_fit).
+MOST_WORKERS = max(1, (os.cpu_count() or 2) - 1)
+FORKS = "fork" in multiprocessing.get_all_start_methods()  # as setu's analysis process decides
 
 
 # What the system can give out now, or None where it cannot be asked.
@@ -30,18 +32,40 @@ def available_memory_gb():
         if sys.platform.startswith("linux"):
             with open("/proc/meminfo") as meminfo:
                 return next(int(line.split()[1]) for line in meminfo if line.startswith("MemAvailable:")) / 1024 ** 2
+        if sys.platform == "win32":
+            return windows_available_gb()
     except (OSError, ValueError, AttributeError, StopIteration):
         pass
     return None
 
 
+# Physical memory Windows can give out now (GlobalMemoryStatusEx), in GB.
+def windows_available_gb():
+    import ctypes
+
+    class MemoryStatus(ctypes.Structure):
+        _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong), ("total_physical", ctypes.c_ulonglong),
+                    ("available_physical", ctypes.c_ulonglong), ("total_page_file", ctypes.c_ulonglong),
+                    ("available_page_file", ctypes.c_ulonglong), ("total_virtual", ctypes.c_ulonglong),
+                    ("available_virtual", ctypes.c_ulonglong), ("available_extended_virtual", ctypes.c_ulonglong)]
+
+    status = MemoryStatus()
+    status.length = ctypes.sizeof(MemoryStatus)
+    if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+        return None
+    return status.available_physical / 1024 ** 3
+
+
 # Say how big the run is, warn if it may not fit, and choose the workers that do.
 def plan_run(d):
-    nodes, gb = estimated_peak_gb(d)
+    nodes, analysis = estimated_peak_gb(d)
     available = available_memory_gb()
-    workers = workers_that_fit(MOST_WORKERS, gb, available)
+    each = worker_gb(nodes, FORKS)
+    workers = workers_that_fit(MOST_WORKERS, analysis, each, available)
+    gb = analysis + each * workers if workers > 1 else analysis
     bridge_logger._emit("__progress__16", "progress")
-    bridge_logger.sub_step(f"setu: {nodes} deck nodes, estimated peak about {gb:.1f} GB, {workers} workers")
+    free = "free memory unknown, so no workers" if available is None else f"{available:.1f} GB free"
+    bridge_logger.sub_step(f"setu: {nodes} deck nodes, estimated peak about {gb:.1f} GB with {workers} worker{'s' if workers > 1 else ''} ({free})")
     if available is not None and gb > available:
         bridge_logger.warning(f"This bridge may need about {gb:.1f} GB with only {available:.1f} GB free; close other programs or expect it to be slow")
     return workers
