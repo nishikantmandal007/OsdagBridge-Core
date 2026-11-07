@@ -17,8 +17,10 @@ from .plot_dataset import CaseForces, load_states, member_nodes, plot_dataset
 from .unsupported_inputs import check_capability, simplifications
 
 
-# One core is left for this process, which combines what the workers send back; memory sets the rest (workers_that_fit).
-MOST_WORKERS = max(1, (os.cpu_count() or 2) - 1)
+# One core is left for the analysis process, which solves every surface for the workers; measured (2026-11-07, setu 2693a09, 10-core
+# Mac) it keeps at most about four busy: 2x11 m deck 99 / 103 / 108 s with 4 / 6 / 9 workers, 52 m deck 600 / 619 s with 4 / 6, each
+# worker past four costing memory for nothing. Memory may allow fewer (workers_that_fit).
+MOST_WORKERS = max(1, min(4, (os.cpu_count() or 2) - 1))
 
 
 # Say how big the run is, warn if it may not fit, and choose the workers that do.
