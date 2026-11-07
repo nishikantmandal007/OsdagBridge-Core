@@ -1,12 +1,12 @@
 import multiprocessing
 import os
-import sys
 from time import perf_counter
 
 from setu.postprocess.own_process import solve_in_own_process
 from osdagbridge_core.core.bridge_types.plate_girder.designer import BridgeConfig
 from osdagbridge_core.core.utils import common as C
 from osdagbridge_core.core.utils.logger import bridge_logger
+from osdagbridge_core.core.utils.os_specific import available_memory_gb
 from setu.irc6.temperature import effective_temperature_range
 from setu.irc6.wind import design_wind_speed_mps, wind_pressure_pa
 from .bridge_input import (bridge_input, construction_loads, construction_seismic_site, estimated_peak_gb, fill_unequal_depth_wind, normalise_gui_bracing,
@@ -21,39 +21,6 @@ from .unsupported_inputs import check_capability, simplifications
 # One core is left for this process, which combines what the workers send back; memory sets the rest (workers_that_fit).
 MOST_WORKERS = max(1, (os.cpu_count() or 2) - 1)
 FORKS = "fork" in multiprocessing.get_all_start_methods()  # as setu's analysis process decides
-
-
-# What the system can give out now, or None where it cannot be asked.
-def available_memory_gb():
-    try:
-        if sys.platform == "darwin":
-            from osdagbridge_core.core.utils import macos_memory
-            return macos_memory.available_gb()
-        if sys.platform.startswith("linux"):
-            with open("/proc/meminfo") as meminfo:
-                return next(int(line.split()[1]) for line in meminfo if line.startswith("MemAvailable:")) / 1024 ** 2
-        if sys.platform == "win32":
-            return windows_available_gb()
-    except (OSError, ValueError, AttributeError, StopIteration):
-        pass
-    return None
-
-
-# Physical memory Windows can give out now (GlobalMemoryStatusEx), in GB.
-def windows_available_gb():
-    import ctypes
-
-    class MemoryStatus(ctypes.Structure):
-        _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong), ("total_physical", ctypes.c_ulonglong),
-                    ("available_physical", ctypes.c_ulonglong), ("total_page_file", ctypes.c_ulonglong),
-                    ("available_page_file", ctypes.c_ulonglong), ("total_virtual", ctypes.c_ulonglong),
-                    ("available_virtual", ctypes.c_ulonglong), ("available_extended_virtual", ctypes.c_ulonglong)]
-
-    status = MemoryStatus()
-    status.length = ctypes.sizeof(MemoryStatus)
-    if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
-        return None
-    return status.available_physical / 1024 ** 3
 
 
 # Say how big the run is, warn if it may not fit, and choose the workers that do.

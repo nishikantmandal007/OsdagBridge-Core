@@ -2,8 +2,9 @@
 import ctypes
 import gc
 import os
-import sys
 import types
+
+from osdagbridge_core.core.utils.os_specific import process_mb, release_freed_memory
 
 
 def _dbg(msg):
@@ -13,36 +14,12 @@ def _dbg(msg):
 
 
 def _malloc_trim():
-    # Return free glibc heap arenas to the OS. gc.collect() frees objects into the
-    # allocator's arena but does NOT hand memory back to the OS — this does.
-    # Best-effort: no-op on other non-glibc platforms.
-    try:
-        if sys.platform == "darwin":
-            from osdagbridge_core.core.utils import macos_memory
-            macos_memory.release()
-            return
-        import ctypes
-        ctypes.CDLL("libc.so.6").malloc_trim(0)
-    except Exception:
-        pass
+    release_freed_memory()
 
 
 def proc_mem_mb():
-    # Current process (RSS, VIRT) in MB from /proc/self/status; (None, None) if unavailable.
-    rss = virt = None
-    try:
-        if sys.platform == "darwin":
-            from osdagbridge_core.core.utils import macos_memory
-            return macos_memory.process_mb()
-        with open("/proc/self/status") as f:
-            for line in f:
-                if line.startswith("VmRSS:"):
-                    rss = int(line.split()[1]) / 1024.0
-                elif line.startswith("VmSize:"):
-                    virt = int(line.split()[1]) / 1024.0
-    except Exception:
-        pass
-    return rss, virt
+    # Current process (RSS, VIRT) in MB; (None, None) if unavailable.
+    return process_mb()
 
 
 class _Mallinfo2(ctypes.Structure):
