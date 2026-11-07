@@ -13,7 +13,12 @@ from osdagbridge_core.core.utils.codes.irc6_2017 import IRC6_2017
 from osdagbridge_core.core.bridge_types.plate_girder.bridge_geometry import CrossSectionLayout
 
 
-GB_PER_WORKER = 0.7  # measured: 8 workers used about 7.2 GB on a 20.85 m deck, 4 workers 2.74 GB
+# Peak memory, measured as the system's physical footprint of every process (2026-11-07, setu 4531519, Standard mesh, macOS) on decks of
+# 3021, 9911 and 18391 nodes: the analysis alone 0.33, 1.14 and 3.84 GB; each forked worker 0.34, about 1.0 and 0.92 GB more; each
+# spawned worker (no fork, as on Windows) 0.27 and 0.55 GB more on the first two. Refit when other decks or platforms are measured.
+ANALYSIS_GB = (0.366, -0.0514, 0.0131)  # a + b k + c k**2, k thousands of deck nodes: through the three measured decks
+FORKED_WORKER_GB = (0.1, 0.09, 1.0)  # a + b k, at most the last: rises with the deck, then levels off
+RESERVE_GB = 0.5  # left free for the app, which receives the results
 
 
 # Lay out the strips from the left edge.
@@ -104,21 +109,37 @@ def reconcile_layout(d):
         d[C.KEY_TS_DECK_OVERHANG] = overhang
 
 
-# Deck nodes and a rough peak memory in GB of the analysis process and its workers: a base plus one stiffness factor (banded estimate).
-# Fitted to two measured runs (free RAM drop with 4 workers: 8.4 m 1.85 GB, 20.85 m 2.74 GB); refit when more widths are measured.
+# Deck nodes and the analysis process's peak memory in GB on its own (fitted above).
 def estimated_peak_gb(d):
     braces, span, mesh = int(d[C.KEY_MP_CB_NO_OF_CROSS_BRACINGS]), float(d[C.KEY_SPAN]), mesh_settings(d)
     along = len(stations_along_span([span * i / (braces + 1) for i in range(braces + 2)], mesh))
     across = round(cross_section(d).total_width_m() / mesh.target_size_across_width_m) + 1
     nodes = along * across
-    return nodes, 1.7 + 0.85 * 6 * nodes * 8 * 6 * min(along, across) / 1024 ** 3
+    return nodes, analysis_gb(nodes)
 
 
-# Workers to start: up to the cap, each needing about this much on top of the analysis, and never fewer than one.
-def workers_that_fit(cap, needed_gb, available_gb):
+def analysis_gb(nodes):
+    a, b, c = ANALYSIS_GB
+    k = nodes / 1000
+    return a + b * k + c * k * k
+
+
+# What each worker adds to the analysis: a forked one shares the factor; a spawned one builds its own model, half the analysis plus
+# 0.1 GB (0.27 and 0.67 GB on the two measured decks, above the 0.27 and 0.55 GB measured)
+def worker_gb(nodes, forked):
+    if forked:
+        a, b, most = FORKED_WORKER_GB
+        return min(a + b * nodes / 1000, most)
+    return 0.5 * analysis_gb(nodes) + 0.1
+
+
+# Workers to start: as many as the cores allow and the free memory holds beside the analysis, or one (the analysis alone, no workers)
+# when two do not fit or the free memory is unknown.
+def workers_that_fit(cap, analysis_gb, each_gb, available_gb):
     if available_gb is None:
-        return cap
-    return max(1, min(cap, int((available_gb - needed_gb) / GB_PER_WORKER)))
+        return 1
+    fit = int((available_gb - RESERVE_GB - analysis_gb) / each_gb)
+    return max(1, min(cap, fit)) if fit >= 2 else 1
 
 
 # Assemble the bridge after OsdagBridge has converted the girder plates to metres.
