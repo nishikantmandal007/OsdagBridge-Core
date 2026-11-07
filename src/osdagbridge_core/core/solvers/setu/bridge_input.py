@@ -14,13 +14,12 @@ from osdagbridge_core.core.bridge_types.plate_girder.bridge_geometry import Cros
 
 
 # Peak memory, measured as the system's physical footprint of every process (macOS, Standard mesh) on decks of 3021, 9911 and 18391
-# nodes: the analysis alone 0.33, 1.14 and 3.90 GB (2026-11-07, setu 4531519). Workers search and combine but never solve (setu
-# dc4d203), so a forked one no longer copies the model: about 0.23, 0.39 and 0.49 GB each (it was about 0.34, 1.0 and 1.45 GB).
-# Refit when other decks or platforms are measured.
-ANALYSIS_GB = (0.366, -0.0514, 0.0131)  # a + b k + c k**2, k thousands of deck nodes: through the three measured decks
-FORKED_WORKER_GB = (0.2, 0.02)  # a + b k: at or above the three measured workers (0.26, 0.40, 0.57 GB)
-# A spawned worker (Windows) builds the model but never factors it: about 0.19 and 0.25 GB on the two larger decks (setu 48e4277).
-SPAWNED_WORKER_GB = (0.15, 0.01)  # a + b k: 0.18, 0.25, 0.33 GB, at or above what was measured
+# nodes. Without workers (2026-11-07, setu 4531519): 0.33, 1.14 and 3.90 GB. With workers, which are spawned and search but never solve
+# (setu 6e3ee1d), whole runs peaked at 0.53 / 0.81 GB (2 / 4 workers), 1.04 / 1.56 GB and 2.75 GB (4 workers): this process plus a
+# share per worker, fitted below, reproduces all five to 0.01 GB. Refit when other decks or platforms are measured.
+ANALYSIS_GB = (0.366, -0.0514, 0.0131)  # a + b k + c k**2, k thousands of deck nodes: the analysis alone, without workers
+WITH_WORKERS_GB = (0.191, 0.0136, 0.00198)  # a + b k + c k**2: this process while workers search
+WORKER_GB = (0.09, 0.0175)  # a + b k: each worker
 RESERVE_GB = 0.5  # left free for the app, which receives the results
 
 
@@ -121,24 +120,30 @@ def estimated_peak_gb(d):
     return nodes, analysis_gb(nodes)
 
 
-def analysis_gb(nodes):
-    a, b, c = ANALYSIS_GB
+def quadratic(coefficients, nodes):
     k = nodes / 1000
-    return a + b * k + c * k * k
+    return sum(c * k ** power for power, c in enumerate(coefficients))
 
 
-# What each worker adds to the analysis: workers search and combine but never solve, forked (Linux, macOS) or spawned (Windows).
-def worker_gb(nodes, forked):
-    a, b = FORKED_WORKER_GB if forked else SPAWNED_WORKER_GB
-    return a + b * nodes / 1000
+# the analysis alone; this process while workers search; and each worker, in GB
+def analysis_gb(nodes):
+    return quadratic(ANALYSIS_GB, nodes)
 
 
-# Workers to start: as many as the cores allow and the free memory holds beside the analysis, or one (the analysis alone, no workers)
-# when two do not fit or the free memory is unknown.
-def workers_that_fit(cap, analysis_gb, each_gb, available_gb):
+def with_workers_gb(nodes):
+    return quadratic(WITH_WORKERS_GB, nodes)
+
+
+def worker_gb(nodes):
+    return quadratic(WORKER_GB, nodes)
+
+
+# Workers to start: as many as the cores allow and the free memory holds beside this process and a reserve, or one (the analysis
+# alone, no workers) when two do not fit or the free memory is unknown.
+def workers_that_fit(cap, main_gb, each_gb, available_gb):
     if available_gb is None:
         return 1
-    fit = int((available_gb - RESERVE_GB - analysis_gb) / each_gb)
+    fit = int((available_gb - RESERVE_GB - main_gb) / each_gb)
     return max(1, min(cap, fit)) if fit >= 2 else 1
 
 
