@@ -18,7 +18,7 @@ from osdagbridge_core.core.solvers.setu.unsupported_inputs import check_capabili
 from osdagbridge_core.core.solvers.setu.girder_demands import girder_demands, raw_deflections
 from setu import MeshSettings
 from osdagbridge_core.core.solvers.setu.bridge_input import (
-    added_dead_loads, brace_value, bracing, bridge_input, cross_section, analysis_gb, estimated_peak_gb, normalise_gui_bracing, worker_gb, workers_that_fit, reconcile_layout, seismic_site, temperature_site, wind_site)
+    added_dead_loads, brace_value, bracing, bridge_input, cross_section, analysis_gb, estimated_peak_gb, normalise_gui_bracing, with_workers_gb, worker_gb, workers_that_fit, reconcile_layout, seismic_site, temperature_site, wind_site)
 
 
 # Prepare the GUI inputs without building a structural model.
@@ -333,14 +333,12 @@ def test_workers_that_fit(available, workers):
     assert workers_that_fit(4, 2.0, 1.0, available) == workers
 
 
-# The estimate goes through the measured decks, and each worker estimate is at or above what a worker measured.
+# The estimates give the measured peaks: the analysis alone, and whole runs with 2 or 4 workers.
 def test_memory_estimate_matches_the_measured_decks():
     for nodes, measured_gb in ((3021, 0.33), (9911, 1.14), (18391, 3.84)):
         assert analysis_gb(nodes) == pytest.approx(measured_gb, abs=0.02)
-    for nodes, forked_worker_gb in ((3021, 0.23), (9911, 0.39), (18391, 0.49)):
-        assert forked_worker_gb <= worker_gb(nodes, forked=True) <= forked_worker_gb + 0.1
-    for nodes, spawned_worker_gb in ((9911, 0.19), (18391, 0.25)):
-        assert spawned_worker_gb <= worker_gb(nodes, forked=False) <= spawned_worker_gb + 0.1
+    for nodes, workers, measured_gb in ((3021, 2, 0.53), (3021, 4, 0.81), (9911, 2, 1.04), (9911, 4, 1.56), (18391, 4, 2.75)):
+        assert with_workers_gb(nodes) + workers * worker_gb(nodes) == pytest.approx(measured_gb, abs=0.02)
 
 
 # Channel and single angle sections give the database area, doubled for double sections.

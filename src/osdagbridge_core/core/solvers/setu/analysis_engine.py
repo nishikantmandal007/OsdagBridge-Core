@@ -1,4 +1,3 @@
-import multiprocessing
 import os
 from time import perf_counter
 
@@ -10,7 +9,7 @@ from osdagbridge_core.core.utils.os_specific import available_memory_gb
 from setu.irc6.temperature import effective_temperature_range
 from setu.irc6.wind import design_wind_speed_mps, wind_pressure_pa
 from .bridge_input import (bridge_input, construction_loads, construction_seismic_site, estimated_peak_gb, fill_unequal_depth_wind, normalise_gui_bracing,
-                           reconcile_layout, seismic_site, temperature_site, wind_site, worker_gb, workers_that_fit)
+                           reconcile_layout, seismic_site, temperature_site, wind_site, with_workers_gb, worker_gb, workers_that_fit)
 from .girder_demands import case_demand, deflections_cache, girder_demands
 from .live_load_report import live_load_report_values
 from .run_progress import RunProgress
@@ -20,16 +19,15 @@ from .unsupported_inputs import check_capability, simplifications
 
 # One core is left for this process, which combines what the workers send back; memory sets the rest (workers_that_fit).
 MOST_WORKERS = max(1, (os.cpu_count() or 2) - 1)
-FORKS = "fork" in multiprocessing.get_all_start_methods()  # as setu's analysis process decides
 
 
 # Say how big the run is, warn if it may not fit, and choose the workers that do.
 def plan_run(d):
-    nodes, analysis = estimated_peak_gb(d)
+    nodes, alone = estimated_peak_gb(d)
     available = available_memory_gb()
-    each = worker_gb(nodes, FORKS)
-    workers = workers_that_fit(MOST_WORKERS, analysis, each, available)
-    gb = analysis + each * workers if workers > 1 else analysis
+    main, each = with_workers_gb(nodes), worker_gb(nodes)
+    workers = workers_that_fit(MOST_WORKERS, main, each, available)
+    gb = main + each * workers if workers > 1 else alone
     bridge_logger._emit("__progress__16", "progress")
     free = "free memory unknown, so no workers" if available is None else f"{available:.1f} GB free"
     bridge_logger.sub_step(f"setu: {nodes} deck nodes, estimated peak about {gb:.1f} GB with {workers} worker{'s' if workers > 1 else ''} ({free})")
