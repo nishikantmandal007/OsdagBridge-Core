@@ -13,7 +13,7 @@ from .bridge_input import (bridge_input, construction_loads, construction_seismi
 from .girder_demands import case_demand, deflections_cache, girder_demands
 from .live_load_report import live_load_report_values
 from .run_progress import RunProgress
-from .plot_dataset import CaseForces, load_states, member_nodes, plot_dataset
+from .plot_dataset import CaseForces, governing_values_of_states, load_states, member_nodes, plot_dataset
 from .unsupported_inputs import check_capability, simplifications
 
 
@@ -137,10 +137,12 @@ class SetuAnalysisEngine:
         self.model = NoGrillageElements()
         self._deduplicated_results = plot_dataset(values, bridge.get_edge_dist())
         self.states = load_states(values)
+        self.state_values = governing_values_of_states(values.diagrams)
 
     # The output dock's design bars for one load case in its dropdown.
     def case_demand(self, girder_name, load_case):
-        return case_demand(self.states, int(girder_name[1:]) - 1, load_case, self.per_girder_demands[girder_name])
+        return case_demand(self.states, int(girder_name[1:]) - 1, load_case, self.per_girder_demands[girder_name],
+                           self.design_values.dead, self.state_values)
 
     # Girder and deck design only need the canonical girder labels here.
     def get_result_data(self):

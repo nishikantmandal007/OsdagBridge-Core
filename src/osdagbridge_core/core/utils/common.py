@@ -1968,3 +1968,9 @@ def get_channel_section_list() -> list[str]:
         return designations
     except sqlite3.Error:
         return []
+
+# Design options the girder design does not read: it runs every limit-state check and uses these partial factors built into its
+# IRC:22 clause methods. With setu they are set to these values and locked, and an .osi holding others is stated, not ignored.
+SETU_FIXED_DESIGN_FACTORS = {KEY_DO_GAMMA_C_BASIC: "1.50", KEY_DO_GAMMA_C_ACCIDENTAL: "1.20", KEY_DO_GAMMA_S: "1.15", KEY_DO_GAMMA_FLT: "1.00"}
+SETU_ALWAYS_CHECKED = (KEY_DO_ULS_BENDING, KEY_DO_ULS_SHEAR, KEY_DO_ULS_LTB, KEY_DO_ULS_TRANSVERSE, KEY_DO_ULS_LONG_SHEAR,
+                       KEY_DO_ULS_FATIGUE, KEY_DO_SLS_STRESS, KEY_DO_SLS_LONG_SHEAR, KEY_DO_SLS_DEFLECTION, KEY_DO_SLS_CRACK_WIDTH)

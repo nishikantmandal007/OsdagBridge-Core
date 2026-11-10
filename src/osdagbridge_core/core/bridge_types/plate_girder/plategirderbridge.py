@@ -3280,6 +3280,7 @@ class PlateGirderBridge:
                 M_construction_kNm   = lc_demand.get("M_construction_kNm",  0.0),
                 M_girder_sw_kNm      = lc_demand.get("M_girder_sw_kNm",     0.0),
                 M_sls_kNm            = lc_demand.get("M_sls_kNm",           0.0),
+                M_sls_stages_kNm     = lc_demand.get("M_sls_stages_kNm"),   # setu only
                 V_sls_kN             = lc_demand.get("V_sls_kN",            0.0),
                 delta_live_mm        = lc_demand.get("delta_live_mm",       0.0),
                 delta_total_mm       = lc_demand.get("delta_total_mm",      0.0),
@@ -3307,6 +3308,7 @@ class PlateGirderBridge:
                     M_sls_kNm=demand.M_sls_kNm,
                     V_sls_kN=demand.V_sls_kN,
                     Vr_kN=demand.Vr_kN,
+                    M_sls_stages_kNm=demand.M_sls_stages_kNm,
                 )
                 engine = DCREngine(demand, capacity)
                 engine.run_all_checks()

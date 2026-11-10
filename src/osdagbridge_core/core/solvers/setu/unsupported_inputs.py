@@ -87,6 +87,18 @@ def simplifications(bridge):
             (C.KEY_MP_ED_BRACING_TYPE, brace_value(d, C.KEY_MP_CB_TYPE)), (C.KEY_MP_ED_BRACING_SECTION, brace_value(d, C.KEY_MP_CB_BRACING_SECTION_TYPE)),
             (C.KEY_MP_ED_BRACING_SECTION_DESIGNATION, brace_value(d, C.KEY_MP_CB_BRACING_SECTION_DESIGNATION)))):
         notes.append("End diaphragms are analysed with the G1-G2 cross-bracing; member design still checks their own sections")
+    changed = [key.rsplit(".", 1)[-1] for key, value in C.SETU_FIXED_DESIGN_FACTORS.items() if key in d and float(d[key]) != float(value)]
+    if changed:
+        notes.append(f"Partial factors {', '.join(changed)} are not read by the girder design: it uses "
+                     + ", ".join(f"{key.rsplit('.', 1)[-1]} = {value}" for key, value in C.SETU_FIXED_DESIGN_FACTORS.items()))
+    if any(key in d and not d[key] for key in C.SETU_ALWAYS_CHECKED):
+        notes.append("Every limit-state check is run: unticking one in Design Options does not skip it")
+    # setu holds the deck along the span at one bearing only (girder (count - 1) // 2 at the left end): holding every girder there
+    # adds a restraint couple that lowers the girder moments (measured -2.5 % on an edge girder), so the pinned line is modelled so.
+    held = (bridge._girder_count() - 1) // 2 + 1
+    notes.append(f"The left support line is held along the span at G{held}'s bearing only: braking and longitudinal seismic go "
+                 f"through that bearing, which gives G{held} an end moment (the force times the bearing's depth below the girder's "
+                 f"centroid) and its bearing the whole longitudinal force; design that bearing and G{held}'s end for them")
     depths = {bridge._girder_value(C.KEY_MP_GIRDER_DEPTH, i) for i in range(bridge._girder_count())}
     if len(depths) > 1 and float(d[C.KEY_PROJECT_LOCATION]["weather_data"]["wind_speed"]):
         notes.append("Girders of different depths: automatic wind area, drag and height use the deepest girder")

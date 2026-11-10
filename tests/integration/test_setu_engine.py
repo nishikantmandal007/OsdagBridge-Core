@@ -15,7 +15,7 @@ from osdagbridge_core.core.bridge_types.plate_girder.designer import (
 from osdagbridge_core.core.bridge_types.plate_girder.results_data import build_deflections_cache
 from osdagbridge_core.core.solvers.setu.analysis_engine import SetuAnalysisEngine, temperature_report
 from osdagbridge_core.core.solvers.setu.unsupported_inputs import check_capability, simplifications
-from osdagbridge_core.core.solvers.setu.girder_demands import girder_demands, raw_deflections
+from osdagbridge_core.core.solvers.setu.girder_demands import girder_demands, raw_deflections, sls_stages
 from osdagbridge_core.core.solvers.setu.bridge_input import (
     added_dead_loads, brace_value, bracing, bridge_input, cross_section, analysis_gb, estimated_peak_gb, normalise_gui_bracing, with_workers_gb, worker_gb, workers_that_fit, reconcile_layout, seismic_site, temperature_site, wind_site)
 
@@ -120,11 +120,16 @@ def test_input_mapping():
         "top_flange_thickness_m": C.KEY_MP_GIRDER_TOP_FLANGE_THICKNESS,
         "bottom_flange_width_m": C.KEY_MP_GIRDER_BOTTOM_FLANGE_WIDTH,
         "bottom_flange_thickness_m": C.KEY_MP_GIRDER_BOTTOM_FLANGE_THICKNESS,
-        "web_height_m": C.KEY_MP_GIRDER_WEB_DEPTH, "web_thickness_m": C.KEY_MP_GIRDER_WEB_THICKNESS,
+        "web_thickness_m": C.KEY_MP_GIRDER_WEB_THICKNESS,
     }
     for g in range(mapped.girders.count):
         for attr, key in plate_keys.items():
             assert getattr(mapped.girders.section_at(g), attr) == b._girder_value(key, g)
+        # the web the designer checks: overall depth less both flanges
+        web_m = (b._girder_value(C.KEY_MP_GIRDER_DEPTH, g) - b._girder_value(C.KEY_MP_GIRDER_TOP_FLANGE_THICKNESS, g)
+                 - b._girder_value(C.KEY_MP_GIRDER_BOTTOM_FLANGE_THICKNESS, g))
+        assert mapped.girders.section_at(g).web_height_m == pytest.approx(web_m)
+        assert mapped.girders.section_at(g).web_height_m * 1000 == pytest.approx(BridgeConfig.from_plate_girder_bridge(b, g).section.dw)
     assert mapped.bracing.arrangement == "XTB"
     assert mapped.bracing.station_count == int(d[C.KEY_MP_CB_NO_OF_CROSS_BRACINGS]) + 2
     assert mapped.bracing.area_m2 == C.get_angle_section_properties(brace_value(d, C.KEY_MP_CB_BRACING_SECTION_DESIGNATION))["Area"] * 1e-4 * 2
@@ -214,6 +219,12 @@ def test_vehicle_neither_engine_analyses(key, value):
     assert key in str(error.value)
 
 
+# Every setu run states its bearing layout: the deck is held along the span at one bearing (four girders: G2's).
+BEARING_NOTE = ("The left support line is held along the span at G2's bearing only: braking and longitudinal seismic go through that "
+                "bearing, which gives G2 an end moment (the force times the bearing's depth below the girder's centroid) and its bearing "
+                "the whole longitudinal force; design that bearing and G2's end for them")
+
+
 # Inputs ospgrillage's analysis also ignores: the run goes ahead, and setu says what it did not follow.
 @pytest.mark.parametrize("key,value,says", [
     (C.KEY_LL_CUSTOM_VEHICLES, [{"name": "custom"}], "Custom vehicles"),
@@ -227,10 +238,12 @@ def test_vehicle_neither_engine_analyses(key, value):
     (C.KEY_MP_CB_SPACING + ".G2G3.B2M1", 5.0, "equal spacing"),
     (C.KEY_MATERIAL_CROSS_BRACING_E, 210, "girder steel"),
     (C.KEY_MP_GD_SEGMENT_TABLE + ".G1", [{"start": 0, "end": 10}, {"start": 10, "end": 35}], "segments"),
+    (C.KEY_DO_GAMMA_C_BASIC, "1.40", "gamma_c_basic"),
+    (C.KEY_DO_ULS_SHEAR, False, "Every limit-state check is run"),
 ])
 def test_simplification_is_stated(key, value, says):
     b = prepared(supported_input())
-    assert simplifications(b) == []
+    assert simplifications(b) == [BEARING_NOTE]
     b.input_dict[key] = value
     check_capability(b)
     assert any(says in note for note in simplifications(b))
@@ -264,7 +277,7 @@ def test_defaults_follow_engine():
 def test_shear_modulus_rounding():
     b = prepared(supported_input())
     b.input_dict[C.KEY_MATERIAL_GIRDER_G] = 76.9
-    assert simplifications(b) == []
+    assert simplifications(b) == [BEARING_NOTE]
     b.input_dict[C.KEY_MATERIAL_GIRDER_G] = 80.0
     assert any("Shear modulus" in note for note in simplifications(b))
 
@@ -488,8 +501,9 @@ def expected_demand(engine, g, name=None):
     expected = dict.fromkeys([f.name for f in fields(DemandEnvelope)], 0.0)
     expected.update(Mu_kNm=abs(m.value), Vu_kN=abs(v.value), Nsc=config.fatigue.Nsc,
                     governing_combination=m.combination, location=f"{m.at_m} m", member=f"G{g + 1}", source="setu", lc_type=kind)
+    expected["M_sls_stages_kNm"] = None
     if kind != "ULS":
-        expected.update(M_sls_kNm=abs(rare_m.value), V_sls_kN=abs(rare_v.value))
+        expected.update(M_sls_kNm=abs(rare_m.value), V_sls_kN=abs(rare_v.value), M_sls_stages_kNm=sls_stages(values.dead, rare_m, g))
     if kind in ("", "SLS_frequent"):
         expected.update(stress_range_MPa=values.fatigue_stresses_mpa[g]["steel bottom"].range,
                         shear_range_MPa=values.fatigue[g]["support shear"].range * 1000 / config.section.Aw)
@@ -863,3 +877,31 @@ def test_load_states_without_braking(setu_bridge):
     states = load_states(values)
     assert BRAKING_CASE not in states and LIVE_LOAD_CASE in states
     assert BRAKING_CASE not in set(map(str, plot_dataset(values, setu_bridge.get_edge_dist()).Loadcase.values))
+
+
+# setu runs apply IS 800:2007 as written: the high-shear interaction takes the governing shear strength of cl. 8.4 (here the web's
+# buckling strength), LTB takes βb of cl. 8.2.2, and the SLS moment acts stage by stage (steel, long-term, short-term composite).
+def test_setu_design_corrections(setu_bridge):
+    from osdagbridge_core.core.bridge_types.plate_girder.designer import IRC22CapacityCalculator
+    engine = setu_bridge.grillage_model
+    for g, name in enumerate(engine.per_girder_demands):
+        demand, config = engine.per_girder_demands[name], engine.configs[g]
+        assert config.setu
+        stages = demand.M_sls_stages_kNm
+        assert stages["steel"] > 0 and stages["long_term"] > 0 and stages["short_term"] > 0
+        assert sum(stages.values()) == pytest.approx(demand.M_sls_kNm)
+        calc = IRC22CapacityCalculator(config)
+        cap = calc.compute_all(Vu_kN=demand.Vu_kN, M_sls_kNm=demand.M_sls_kNm, V_sls_kN=demand.V_sls_kN, M_sls_stages_kNm=stages)
+        assert cap.details["combined_bending_shear"]["Vd_used_kN"] == pytest.approx(min(cap.Vd_kN, cap.Vcr_kN), abs=1e-3)
+        ltb, sec, mat = cap.details["buckling_resistance"], config.section, config.material
+        assert ltb["Mb_kNm"] == pytest.approx(ltb["chi_LT"] * ltb["beta_b"] * sec.Zp_steel * mat.fy / mat.gamma_m0 / 1e6, rel=1e-3)
+        comp = calc.compute_composite_section_props(cap.beff_mm)
+        bottom = stages["steel"] * 1e6 * sec.y_cg_from_bot / sec.Iz_steel + sum(
+            stages[part] * 1e6 * comp[part][C.KEY_COMP_Y_FROM_BOT] / comp[part][C.KEY_COMP_I] for part in ("long_term", "short_term"))
+        assert cap.details["sls_actual_stresses"]["fbt_MPa"] == pytest.approx(bottom, abs=1e-2)
+        # the bare steel carries its share on a far smaller section than the composite one
+        whole = calc.compute_all(Vu_kN=demand.Vu_kN, M_sls_kNm=demand.M_sls_kNm, V_sls_kN=demand.V_sls_kN)
+        assert cap.details["sls_actual_stresses"]["fbt_MPa"] > whole.details["sls_actual_stresses"]["fbt_MPa"]
+    sls_case = next(case for case in engine.states if case.startswith("SLS_RARE_"))
+    case = engine.case_demand("G1", sls_case)
+    assert sum(case["M_sls_stages_kNm"].values()) == pytest.approx(case["M_sls_kNm"])

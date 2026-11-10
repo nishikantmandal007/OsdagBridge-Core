@@ -349,6 +349,14 @@ class BridgeConfig:
     studs: ShearStudConfig
     fatigue: FatigueConfig
     stiffener: Optional[StiffenerConfig] = None            # None = stiffener checks skipped
+    # The analysis engine ("setu" or "ospgrillage"). The IS 800:2007 corrections below (cl. 8.2.2 βb in LTB, cl. 8.4 shear
+    # resistance in the high-shear interaction, stage-by-stage SLS stresses) apply to setu runs only; ospgrillage runs as before.
+    engine: str = ""
+
+    @property
+    def setu(self) -> bool:
+        from osdagbridge_core.core.utils.common import ENGINE_SETU
+        return self.engine == ENGINE_SETU
 
     @classmethod
     def from_plate_girder_bridge(cls, bridge: Any, girder_index: int | None = None) -> "BridgeConfig":
@@ -655,8 +663,10 @@ class BridgeConfig:
             bs_R_kN     = 0.0,
         )
 
+        from osdagbridge_core.core.utils.common import KEY_ANALYSIS_ENGINE
         return cls(material=material, section=section, geometry=geometry,
-                   slab=slab, studs=studs, fatigue=fatigue, stiffener=stiffener)
+                   slab=slab, studs=studs, fatigue=fatigue, stiffener=stiffener,
+                   engine=str(bridge.input_dict.get(KEY_ANALYSIS_ENGINE, "")))
 
     def summary(self) -> str:
         s, g, m = self.section, self.geometry, self.material
@@ -720,6 +730,9 @@ class DemandEnvelope:
     V_sls_kN: float = 0.0
     Vr_kN: float = 0.0                                    # Cl.606.4.2 — LL shear range (Vmax_LL - Vmin_LL)
     M_girder_sw_kNm: float = 0.0                          # Construction stage 1: girder self-weight only (bare steel)
+    # M_sls_kNm split by the section that carries it on an unpropped deck: {"steel", "long_term", "short_term"} (kN·m).
+    # Only the setu engine supplies it; None keeps the whole moment on the short-term composite section.
+    M_sls_stages_kNm: Optional[dict] = None
     # LC type — governs which checks are applicable (see DCREngine._*_TYPES sets).
     # "" = aggregate envelope (all applicable checks run); typed = per-LC run with scoped checks.
     # Values: "ULS" | "SLS_frequent" | "SLS" | "DL_LL" | "live_only" | "individual" | ""
@@ -1159,7 +1172,10 @@ class IRC22CapacityCalculator:
             "alpha_LT" : res["alpha_LT"],
             "phi_LT"   : phi_LT,
             "chi_LT"   : res["chi_LT"],
-            "Mb_kNm"   : res["Mpl_buckling_kNm"],
+            # IS 800:2007 cl. 8.2.2: Md = βb Zp χLT fy / γm0, βb = Ze/Zp for semi-compact sections (taken for slender too);
+            # the clause method computes βb but leaves it out of the moment, so setu runs put it back.
+            "Mb_kNm"   : round(res["Mpl_buckling_kNm"] * (res["beta_b"] if self.cfg.setu else 1.0), 3),
+            "beta_b"   : res["beta_b"],
             "clause"   : res["clause"],
             "source"   : "IRC22_2014",
         }
@@ -1229,9 +1245,14 @@ class IRC22CapacityCalculator:
         M_sls_kNm: float,
         V_sls_kN: float,
         comp_props: dict = None,
+        stages_kNm: Optional[dict] = None,
     ) -> dict:
         """
         IRC 22:2015 Cl.604.3.1 — Actual SLS stress calculation and limit checks.
+
+        With ``stages_kNm`` (setu: {"steel", "long_term", "short_term"}) each part of the moment acts on the section that
+        carries it on an unpropped deck (Cl.604.3: bare steel, long-term composite n = Es/(0.5 Ecm), short-term composite
+        n = Es/Ecm) and the stresses are added; without it the whole moment acts on the short-term composite section.
 
         Uses the SHORT-TERM composite section (modular ratio n = Es/Ecm) as required
         for serviceability checks under live loading.
@@ -1286,6 +1307,22 @@ class IRC22CapacityCalculator:
         y_steel_top_from_NA        = y_steel_top_from_bot_steel - y_comp_bot  # −ve → above NA (comp)
         fbc = M_Nmm * abs(y_steel_top_from_NA) / I_comp   # compressive stress at top steel fibre
         fbt = M_Nmm * y_bot / I_comp                        # tensile stress at bottom steel fibre
+
+        if stages_kNm:
+            # Stage by stage, signed (compression at the top fibres, tension at the bottom positive), then added.
+            steel_Nmm = stages_kNm["steel"] * 1e6
+            sigma_c = sigma_rebar = 0.0
+            fbc = steel_Nmm * (sec.D - sec.y_cg_from_bot) / sec.Iz_steel
+            fbt = steel_Nmm * sec.y_cg_from_bot / sec.Iz_steel
+            for part, props in (("long_term", comp_props["long_term"]), ("short_term", short)):
+                M_part = stages_kNm[part] * 1e6
+                I_part, y_na = props[KEY_COMP_I], props[KEY_COMP_Y_FROM_BOT]
+                sigma_c += M_part * props[KEY_COMP_Y_TOP] / (props[KEY_COMP_N] * I_part)
+                sigma_rebar += M_part * (y_rebar_from_steel_bot - y_na) / I_part
+                fbc += M_part * (sec.D - y_na) / I_part
+                fbt += M_part * y_na / I_part
+            sigma_rebar = max(sigma_rebar, 0.0)
+            fbc = abs(fbc)
 
         # ── Average web shear stress ───────────────────────────────────────────
         tau_b = V_N / sec.Aw if sec.Aw > 0.0 else 0.0
@@ -1874,6 +1911,7 @@ class IRC22CapacityCalculator:
         V_sls_kN: float = 0.0,
         Vr_kN: float = 0.0,              # Cl.606.4.2 — LL shear range for fatigue stud spacing
         provided_stud_spacing_mm: float = None,
+        M_sls_stages_kNm: Optional[dict] = None,   # setu: M_sls split steel / long-term / short-term
     ) -> CapacityResults:
         results = CapacityResults()
         results.source = "IRC22_2014"
@@ -1963,9 +2001,13 @@ class IRC22CapacityCalculator:
         results.details["buckling_resistance_stage1"] = ltb_s1
 
         # 6. Combined bending + shear
+        # IS 800:2007 cl. 8.2.1.3 / 9.2.2 take Vd as the design shear strength of cl. 8.4: plastic shear (8.4.1) or the web's shear
+        # buckling strength (8.4.2), whichever governs. setu runs use the governing one; ospgrillage runs keep the plastic value.
+        Vd_interaction_kN = min(results.Vd_kN, results.Vcr_kN) if self.cfg.setu and results.Vcr_kN > 0 else results.Vd_kN
         combined = self.compute_combined_bending_shear(
-            results.Md_kNm, Vu_kN, results.Vd_kN
+            results.Md_kNm, Vu_kN, Vd_interaction_kN
         )
+        combined["Vd_used_kN"] = round(Vd_interaction_kN, 3)
         results.Mdv_kNm = combined["Mdv_kNm"]
         results.beta_interaction = combined["beta"]
         results.details["combined_bending_shear"] = combined
@@ -2058,6 +2100,7 @@ class IRC22CapacityCalculator:
             M_sls_kNm=M_sls_kNm,
             V_sls_kN=V_sls_kN,
             comp_props=comp_props,
+            stages_kNm=M_sls_stages_kNm if self.cfg.setu else None,
         )
         results.details["sls_actual_stresses"] = sls_actual
         if not sls_actual.get("skipped"):                    
@@ -3286,6 +3329,7 @@ def _compute_per_lc_dcr(
             M_sls_kNm=lc_d.M_sls_kNm,
             V_sls_kN=lc_d.V_sls_kN,
             Vr_kN=lc_d.Vr_kN,
+            M_sls_stages_kNm=lc_d.M_sls_stages_kNm,
         )
         lc_engine = DCREngine(lc_d, lc_cap)
         lc_engine.run_all_checks()
@@ -3515,6 +3559,7 @@ def run_design_check(
             M_sls_kNm=g_demand.M_sls_kNm,
             V_sls_kN=g_demand.V_sls_kN,
             Vr_kN=g_demand.Vr_kN,
+            M_sls_stages_kNm=g_demand.M_sls_stages_kNm,
         )
         g_engine = DCREngine(g_demand, g_cap)
         g_engine.run_all_checks()
