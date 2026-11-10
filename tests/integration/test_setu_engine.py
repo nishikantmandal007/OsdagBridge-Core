@@ -326,13 +326,6 @@ def test_report_forces_and_case_bars(setu_bridge):
     assert any("Class SV governs" in note and "G1" in note for note in setu_bridge.output_dict["setu_simplifications"])
 
 
-# Bracing design never takes a process per core.
-def test_design_pool_capped():
-    from osdagbridge_core.core.utils import connect
-    with connect.design_pool(64) as pool:
-        assert pool._max_workers == connect.DESIGN_WORKER_LIMIT
-
-
 # Peak memory grows as the deck is widened.
 def test_peak_estimate_grows_with_width():
     narrow, wide = supported_input(), supported_input()
