@@ -17,9 +17,15 @@ g = 9.81
 KEY_ANALYSIS_ENGINE = "analysis.engine"
 ENGINE_SETU = "setu"
 ENGINE_OSPGRILLAGE = "ospgrillage"
-# setu mesh preset (setu MeshSettings.preset): element length along the span sets accuracy and run time
+# setu mesh: (element length along the span, at the bearings, length of the bearing zone, element size across the deck), metres.
+# Numerical choices, not IRC values. Along the span 0.25 / 0.5 / 1.0 m; the bearing and across sizes are setu's measured fine,
+# standard and fast ones (setu docs/accuracy.md), so each level is at least as fine as the setu preset it replaces.
 KEY_ANALYSIS_MESH = "analysis.mesh"
-MESH_PRESETS = ("Fast", "Standard", "Fine")
+MESH_PRESETS = {
+    "Fine": (0.25, 0.05, 1.5, 0.10),
+    "Standard": (0.5, 0.1, 1.5, 0.15),
+    "Coarse": (1.0, 0.2, 1.5, 0.25),
+}
 
 # ========== Type of Fields Start ==========================================================
 TYPE_MODULE = "module"

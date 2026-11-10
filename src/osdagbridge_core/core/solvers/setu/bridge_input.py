@@ -33,9 +33,13 @@ def cross_section(d):
                                         crowd_load=bool(d[C.KEY_LL_CROWD_LOAD]), congestion=bool(d[C.KEY_LL_CONGESTION]))
 
 
-# The setu mesh preset the user chose (Fast, Standard, Fine).
+# The mesh the user chose (Fine, Standard, Coarse), as setu element lengths.
 def mesh_settings(d):
-    return MeshSettings.preset(d[C.KEY_ANALYSIS_MESH].lower())
+    name = d[C.KEY_ANALYSIS_MESH]
+    if name not in C.MESH_PRESETS:
+        raise ValueError(f"mesh must be one of {', '.join(C.MESH_PRESETS)}, got {name!r}: choose it again in Additional Inputs")
+    along_m, support_m, zone_m, across_m = C.MESH_PRESETS[name]
+    return MeshSettings(None, across_m, element_length_m=along_m, support_element_length_m=support_m, support_zone_m=zone_m)
 
 
 # Keep each girder's resolved plates in metres.

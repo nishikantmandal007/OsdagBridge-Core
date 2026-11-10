@@ -1319,9 +1319,8 @@ DESIGN_OPTIONS_SCHEMA = {
                 "setu follows IRC:6-2017 with Amendment 10: it always searches Class A and Class 70R (Wheeled, Tracked, single axle "
                 "and Bogie), analyses Class SV when ticked, and leaves out Class AA (deleted by Amendment 10) and braking with Class SV "
                 "(cl. 204.5.4), so those Live Load boxes are set and locked while it is selected.\n\n"
-                "Mesh (setu): Fast, Standard or Fine set the element length along the span (3.0 / 1.5 / 0.75 m, shorter at the bearings). "
-                "Measured on a 35 m bridge against a very fine mesh: Fast about 2% low on brace forces, Standard within 1%, Fine within 0.3%; "
-                "Fine takes about 2.5 times as long as Standard. The report states the mesh used."
+                "Mesh (setu): Fine, Standard or Coarse set the element length along the span (0.25 / 0.5 / 1.0 m). "
+                "The report states the mesh used."
             ),
         },
 
