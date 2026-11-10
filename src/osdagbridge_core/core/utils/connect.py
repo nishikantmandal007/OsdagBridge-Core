@@ -6,11 +6,10 @@ os.environ["PYTHONIOENCODING"] = "utf-8"
 import builtins
 import contextlib
 import logging
+import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
 from typing import Any, Dict, List
-
-from osdagbridge_core.core.utils.os_specific import design_process_context, utf8_console
 
 
 # Safe print wrapper to avoid Unicode crashes
@@ -25,7 +24,9 @@ def safe_print(*args, **kwargs):
 builtins.print = safe_print
 
 # Reconfigure Windows terminal encoding
-utf8_console()
+if sys.platform.startswith("win"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="ignore")
+    sys.stderr.reconfigure(encoding="utf-8", errors="ignore")
 
 from osdag_core.cli import _get_output_dictionary
 
@@ -59,7 +60,9 @@ def suppress_output(enabled: bool = True):
 
 def run_calculation(design_dict: Dict[str, Any], quiet: bool = True) -> Dict[str, Any]:
     # Every subprocess needs UTF-8 again
-    utf8_console()
+    if sys.platform.startswith("win"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="ignore")
+        sys.stderr.reconfigure(encoding="utf-8", errors="ignore")
 
     with suppress_output(quiet):
         module_name = design_dict.get("Module")
@@ -96,8 +99,7 @@ def run_calculation(design_dict: Dict[str, Any], quiet: bool = True) -> Dict[str
 
         return output_dict
 
-# Bracing member designs at once, on any machine: every worker is a whole process.
-DESIGN_WORKER_LIMIT = 4
+_forkserver_preloaded = False
 
 
 def design_pool(max_workers: int) -> ProcessPoolExecutor:
@@ -114,8 +116,16 @@ def design_pool(max_workers: int) -> ProcessPoolExecutor:
     imported and shares those pages copy-on-write. Windows has no forkserver and
     falls back to spawn — its default start method anyway.
     """
-    ctx = design_process_context(["osdagbridge_core.core.utils.connect"])
-    return ProcessPoolExecutor(max_workers=min(max_workers, DESIGN_WORKER_LIMIT), mp_context=ctx)
+    import multiprocessing
+    try:
+        ctx = multiprocessing.get_context("forkserver")
+        global _forkserver_preloaded
+        if not _forkserver_preloaded:
+            ctx.set_forkserver_preload(["osdagbridge_core.core.utils.connect"])
+            _forkserver_preloaded = True
+    except ValueError:
+        ctx = multiprocessing.get_context("spawn")
+    return ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx)
 
 
 def run_parallel_designs(design_dicts: List[Dict[str, Any]], quiet: bool = True) -> List[Dict[str, Any]]:

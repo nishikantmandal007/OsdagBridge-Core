@@ -4,8 +4,6 @@ import gc
 import os
 import types
 
-from osdagbridge_core.core.utils.os_specific import process_mb, release_freed_memory
-
 
 def _dbg(msg):
     # Monitoring print, off by default; set OSDAGBRIDGE_OPS_DEBUG=1 to enable.
@@ -14,12 +12,29 @@ def _dbg(msg):
 
 
 def _malloc_trim():
-    release_freed_memory()
+    # Return free glibc heap arenas to the OS. gc.collect() frees objects into the
+    # allocator's arena but does NOT hand memory back to the OS — this does.
+    # Best-effort: no-op on non-glibc platforms.
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
 
 
 def proc_mem_mb():
-    # Current process (RSS, VIRT) in MB; (None, None) if unavailable.
-    return process_mb()
+    # Current process (RSS, VIRT) in MB from /proc/self/status; (None, None) if unavailable.
+    rss = virt = None
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    rss = int(line.split()[1]) / 1024.0
+                elif line.startswith("VmSize:"):
+                    virt = int(line.split()[1]) / 1024.0
+    except Exception:
+        pass
+    return rss, virt
 
 
 class _Mallinfo2(ctypes.Structure):
@@ -189,7 +204,6 @@ _BRIDGE_RESULT_ATTRS = (
     # (~20 MB, tracemalloc: xarray duck_array_ops) alive on the post-release floor even
     # though grillage_model itself was replaced. Recomputed every design — safe to drop.
     "result_envelopes",
-    "_results_with_envelope",
 )
 
 # Raw per-load-case record containers on the ospgrillage Results object.

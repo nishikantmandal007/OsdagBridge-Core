@@ -111,7 +111,6 @@ from typing import Optional, List, Literal
 
 from osdagbridge_core.core.reports.report_utils import _tex, ReportChartGenerator, configure_grouped_table_breaks
 from .executive_summary import executive_summary
-from osdagbridge_core.core.utils.os_specific import no_console_window
 from .chap1 import ch1_project_info
 from .chap2 import ch2_input_parameters
 from .chap3 import ch3_loads
@@ -958,7 +957,8 @@ def generate_report(payload, request):
                             'check': False,
                             'env': os.environ.copy()
                         }
-                        kwargs.update(no_console_window())
+                        if os.name == 'nt':
+                            kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
 
                         res = subprocess.run(
                             [compiler, '-interaction=nonstopmode', request.file_stem + '.tex'],
