@@ -16,7 +16,6 @@ from osdagbridge_core.core.bridge_types.plate_girder.results_data import build_d
 from osdagbridge_core.core.solvers.setu.analysis_engine import SetuAnalysisEngine, temperature_report
 from osdagbridge_core.core.solvers.setu.unsupported_inputs import check_capability, simplifications
 from osdagbridge_core.core.solvers.setu.girder_demands import girder_demands, raw_deflections
-from setu import MeshSettings
 from osdagbridge_core.core.solvers.setu.bridge_input import (
     added_dead_loads, brace_value, bracing, bridge_input, cross_section, analysis_gb, estimated_peak_gb, normalise_gui_bracing, with_workers_gb, worker_gb, workers_that_fit, reconcile_layout, seismic_site, temperature_site, wind_site)
 
@@ -132,7 +131,8 @@ def test_input_mapping():
     assert mapped.bracing.steel_grade == d[C.KEY_CROSS_BRACING]
     assert mapped.bracing.end_diaphragm_steel_grade == d[C.KEY_END_DIAPHRAGM]
     assert d[C.KEY_ANALYSIS_MESH] == "Standard"
-    assert vars(mapped.mesh) == vars(MeshSettings.preset("standard"))
+    assert (mapped.mesh.element_length_m, mapped.mesh.support_element_length_m, mapped.mesh.support_zone_m,
+            mapped.mesh.target_size_across_width_m) == (0.5, 0.1, 1.5, 0.15)
     assert not mapped.cross_section.crowd_load and not mapped.cross_section.congestion
     assert vars(mapped.added_dead_loads) == {"footpath_kpa": 0.0, "kerb_kn_per_m": 0.0, "median_kn_per_m": 0.0,
                                              "crash_barrier_kn_per_m": float(d[C.KEY_CB_LOAD]), "railing_kn_per_m": 0.0}
@@ -405,12 +405,18 @@ def test_construction_seismic_site():
     assert site.horizontal_coefficient == pytest.approx(bridge.horizontal_coefficient / 1.2)
 
 
-# The mesh preset sets the mesh and the memory estimate.
+# The mesh choice sets the element lengths and the memory estimate; an unknown name is refused.
 def test_mesh_preset():
-    fast, fine = supported_input(), supported_input()
-    fast[C.KEY_ANALYSIS_MESH], fine[C.KEY_ANALYSIS_MESH] = "Fast", "Fine"
-    assert estimated_peak_gb(fast)[0] < estimated_peak_gb(supported_input())[0] < estimated_peak_gb(fine)[0]
-    assert vars(prepared_bridge_input(fine).mesh) == vars(MeshSettings.preset("fine"))
+    coarse, fine = supported_input(), supported_input()
+    coarse[C.KEY_ANALYSIS_MESH], fine[C.KEY_ANALYSIS_MESH] = "Coarse", "Fine"
+    assert estimated_peak_gb(coarse)[0] < estimated_peak_gb(supported_input())[0] < estimated_peak_gb(fine)[0]
+    assert vars(prepared_bridge_input(fine).mesh) == {"panels_between_braces": None, "target_size_across_width_m": 0.10,
+        "element_length_m": 0.25, "support_element_length_m": 0.05, "support_zone_m": 1.5}
+    assert prepared_bridge_input(coarse).mesh.element_length_m == 1.0
+    old = supported_input()
+    old[C.KEY_ANALYSIS_MESH] = "Fast"
+    with pytest.raises(ValueError, match="mesh must be one of Fine, Standard, Coarse"):
+        estimated_peak_gb(old)
 
 
 # A required vehicle left unticked says to tick it.
