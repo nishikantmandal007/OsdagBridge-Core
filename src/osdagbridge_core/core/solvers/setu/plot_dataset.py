@@ -42,7 +42,12 @@ def load_states(values):
 
 # Each distinct governing state by its load case name: its girder forces and its brace members' axial forces.
 def governing_states(diagrams):
-    return {f"{prefix}: {'; '.join(targets)}": (forces, braces) for prefix, (targets, forces, braces) in distinct_governing_states(diagrams.governing).items()}
+    return {f"{prefix}: {'; '.join(targets)}": (forces, braces) for prefix, (targets, forces, braces, _) in distinct_governing_states(diagrams.governing).items()}
+
+
+# The first governing value behind each named governing state: its combination's shares give the state's dead and surfacing factors.
+def governing_values_of_states(diagrams):
+    return {f"{prefix}: {'; '.join(targets)}": first for prefix, (targets, _, _, first) in distinct_governing_states(diagrams.governing).items()}
 
 
 # Identical solved states named once per limit state, listing every girder value they govern.
@@ -51,7 +56,7 @@ def distinct_governing_states(governing):
     for (girder, response, limit_state, adverse), diagram in governing.items():
         braces = diagram.brace_forces_kn
         key = (limit_state, b"".join(forces_bytes(diagram.forces[g]) for g in sorted(diagram.forces)), None if braces is None else braces.tobytes())
-        targets, _, _ = by_forces.setdefault(key, ([], diagram.forces, braces))
+        targets, _, _, _ = by_forces.setdefault(key, ([], diagram.forces, braces, diagram))
         targets.append(f"G{girder + 1} {response}, {adverse} ({diagram.governing.combination})")
     counts = dict.fromkeys(COMBINATION_PREFIX.values(), 0)
     named = {}
@@ -134,8 +139,9 @@ def states_dataset(states, lines, first_girder_line):
                     displacements[case, line::len(lines), components.index(component)] = girder_forces.displacements_m[:, column]
             displacements[case, line::len(lines), vertical] = girder_forces.deflection_m
     coords = {"Loadcase": list(states), "Element": elements, "Node": nodes, "Component": components}
+    # the engine tag lets the plots label setu's results (the deflection summary's columns)
     return xr.Dataset({"forces": (("Loadcase", "Element", "Component"), forces),
-                       "displacements": (("Loadcase", "Node", "Component"), displacements)}, coords=coords)
+                       "displacements": (("Loadcase", "Node", "Component"), displacements)}, coords=coords, attrs={"engine": "setu"})
 
 
 # Each skeleton element's end nodes, in the live domain the plot readers walk.

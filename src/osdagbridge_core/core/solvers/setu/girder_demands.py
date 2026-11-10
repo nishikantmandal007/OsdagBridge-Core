@@ -1,5 +1,6 @@
 from setu.irc6.irc_constants import CONSTRUCTION_DEAD_FACTORS, VARIABLE_LOAD_FACTORS
-from setu.utils.constants import FREQUENT, LIVE
+from setu.postprocess.girder_response import STEEL_SELF_WEIGHT, SUPERIMPOSED, SURFACING_STAGE, WET_SLAB
+from setu.utils.constants import DEAD, FREQUENT, LIVE, SURFACING
 from osdagbridge_core.core.bridge_types.plate_girder.designer import (
     DemandEnvelope, apply_camber_to_deflections_cache)
 
@@ -33,7 +34,42 @@ def force_demands(values, girder, seismic, special_vehicle=None):
     rare_v = governing(candidates(values, special_vehicle, girder, "support shear", ["serviceability, rare"]))
     return dict(Mu_kNm=abs(moment.value), Vu_kN=abs(shear.value),
                 M_sls_kNm=abs(rare_m.value), V_sls_kN=abs(rare_v.value),
+                M_sls_stages_kNm=sls_stages(values.dead, rare_m, girder),
                 governing_combination=moment.combination, location=f"{moment.at_m} m")
+
+
+# An SLS moment split by the section that carries each part on an unpropped deck (IRC:22 cl. 604.3): the steel's own weight and the
+# wet slab on the steel alone, superimposed dead load and surfacing on the long-term composite section, the rest (live load, wind,
+# temperature) on the short-term composite section. setu's dead share is its factor times the dead stages at the governing station,
+# so each stage takes that factor; signed so the parts add up to the moment's magnitude.
+def sls_stages(dead, value, girder):
+    station = station_of(dead, girder, value.at_m)
+    dead_factor, surfacing_factor = state_factors(dead, value, girder)
+    return stages_at(dead, girder, station, value.value, dead_factor, surfacing_factor)
+
+
+# The station index at a position along the girder.
+def station_of(dead, girder, at_m):
+    return list(dead.stages[STEEL_SELF_WEIGHT][girder].stations_m).index(at_m)
+
+
+# A governing value's dead and surfacing factors: its shares over the stages they factor, at its own station.
+def state_factors(dead, value, girder):
+    station = station_of(dead, girder, value.at_m)
+    at = lambda stage: float(dead.stages[stage][girder].composite_moment_kn_m[station])
+    dead_total = at(STEEL_SELF_WEIGHT) + at(WET_SLAB) + at(SUPERIMPOSED)
+    surfacing = at(SURFACING_STAGE)
+    return (value.shares.get(DEAD, 0.0) / dead_total if dead_total else 0.0,
+            value.shares.get(SURFACING, 0.0) / surfacing if surfacing else 0.0)
+
+
+# One girder's moment at a station split into the steel, long-term and short-term parts, signed so they add to its magnitude.
+def stages_at(dead, girder, station, moment_kn_m, dead_factor, surfacing_factor):
+    at = lambda stage: float(dead.stages[stage][girder].composite_moment_kn_m[station])
+    sign = 1.0 if moment_kn_m >= 0 else -1.0
+    steel = sign * dead_factor * (at(STEEL_SELF_WEIGHT) + at(WET_SLAB))
+    long_term = sign * (dead_factor * at(SUPERIMPOSED) + surfacing_factor * at(SURFACING_STAGE))
+    return {"steel": steel, "long_term": long_term, "short_term": abs(moment_kn_m) - steel - long_term}
 
 
 # ULS construction demands on the bare steel for the designer's LTB checks: stage 1 the girder's own weight times the Table B.2
@@ -93,18 +129,28 @@ def case_kind(name):
     return "individual"
 
 
-# One girder's demand under one load case of the plots' dropdown, worst over the states of an envelope.
-def case_demand(states, girder, name, envelope):
+# One girder's demand under one load case of the plots' dropdown, worst over the states of an envelope. An SLS combination's moment
+# is split by stage (sls_stages) with the dead and surfacing factors of the value it governs; other cases leave it whole.
+def case_demand(states, girder, name, envelope, dead=None, governing_values=None):
     prefixes = {"Envelope ULS": ("BASIC_", "SEISMIC_"), "Envelope SLS": ("SLS_",)}.get(name)
-    forces = [state[girder] for case, state in states.items() if (case.startswith(prefixes) if prefixes else case == name)]
-    if not forces:
+    named = [(case, state[girder]) for case, state in states.items() if (case.startswith(prefixes) if prefixes else case == name)]
+    if not named:
         return None
-    moment = max(float(abs(f.composite_moment_kn_m).max()) for f in forces)
+    forces = [f for _, f in named]
+    worst_case, worst = max(named, key=lambda item: float(abs(item[1].composite_moment_kn_m).max()))
+    moment = float(abs(worst.composite_moment_kn_m).max())
     shear = max(float(abs(f.shear_kn).max()) for f in forces)
     deflection = max(float(abs(f.deflection_m).max()) for f in forces) * 1000
     kind = case_kind(name)
     service = kind != "ULS"
+    stages = None
+    diagram = (governing_values or {}).get(worst_case)
+    if service and dead is not None and diagram is not None and worst_case.startswith("SLS_"):
+        station = int(abs(worst.composite_moment_kn_m).argmax())
+        stages = stages_at(dead, girder, station, float(worst.composite_moment_kn_m[station]),
+                           *state_factors(dead, diagram.governing, diagram.girder))
     return {"Mu_kNm": moment, "Vu_kN": shear, "M_sls_kNm": moment if service else 0.0, "V_sls_kN": shear if service else 0.0,
+            "M_sls_stages_kNm": stages,
             "M_construction_kNm": moment if kind == "DL" else 0.0, "M_girder_sw_kNm": moment if name == "SW" else 0.0,
             "delta_live_mm": deflection if kind == "live_only" else 0.0, "delta_dl_mm": deflection if kind == "DL" else 0.0,
             "stress_range_MPa": envelope.stress_range_MPa if kind == "SLS_frequent" else 0.0,
@@ -137,6 +183,7 @@ def combination_demands(values, girder, config, fatigue, special_vehicle=None):
             Mu_kNm=abs(moment.value), Vu_kN=abs(shear.value),
             M_sls_kNm=abs(moment.value) if kind != "ULS" else 0.0,
             V_sls_kN=abs(shear.value) if kind != "ULS" else 0.0,
+            M_sls_stages_kNm=sls_stages(values.dead, moment, girder) if kind != "ULS" else None,
             stress_range_MPa=fatigue["stress_range_MPa"] if kind == "SLS_frequent" else 0.0,
             shear_range_MPa=fatigue["shear_range_MPa"] if kind == "SLS_frequent" else 0.0,
             Nsc=config.fatigue.Nsc, governing_combination=moment.combination,

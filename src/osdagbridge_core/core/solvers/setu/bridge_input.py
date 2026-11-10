@@ -42,14 +42,16 @@ def mesh_settings(d):
     return MeshSettings(None, across_m, element_length_m=along_m, support_element_length_m=support_m, support_zone_m=zone_m)
 
 
-# Keep each girder's resolved plates in metres.
+# Each girder's resolved plates in metres. The web is the overall depth less both flanges, as the designer takes it: the stored
+# web depth is rounded up from an unrounded depth and can be 1 mm deeper than the plates add up to.
 def girder_sections(bridge):
-    keys = (C.KEY_MP_GIRDER_TOP_FLANGE_WIDTH, C.KEY_MP_GIRDER_TOP_FLANGE_THICKNESS,
-            C.KEY_MP_GIRDER_BOTTOM_FLANGE_WIDTH, C.KEY_MP_GIRDER_BOTTOM_FLANGE_THICKNESS,
-            C.KEY_MP_GIRDER_WEB_DEPTH, C.KEY_MP_GIRDER_WEB_THICKNESS)
-    return Girders(bridge._girder_count(), sections=[
-        PlateGirderSection(*(float(bridge._girder_value(k, i)) for k in keys))
-        for i in range(bridge._girder_count())])
+    def section(i):
+        value = lambda key: float(bridge._girder_value(key, i))
+        web_m = value(C.KEY_MP_GIRDER_DEPTH) - value(C.KEY_MP_GIRDER_TOP_FLANGE_THICKNESS) - value(C.KEY_MP_GIRDER_BOTTOM_FLANGE_THICKNESS)
+        return PlateGirderSection(value(C.KEY_MP_GIRDER_TOP_FLANGE_WIDTH), value(C.KEY_MP_GIRDER_TOP_FLANGE_THICKNESS),
+                                  value(C.KEY_MP_GIRDER_BOTTOM_FLANGE_WIDTH), value(C.KEY_MP_GIRDER_BOTTOM_FLANGE_THICKNESS),
+                                  web_m, value(C.KEY_MP_GIRDER_WEB_THICKNESS))
+    return Girders(bridge._girder_count(), sections=[section(i) for i in range(bridge._girder_count())])
 
 
 # Read a member field without inventing a missing value.
@@ -212,7 +214,9 @@ def fill_unequal_depth_wind(wind, bridge):
         wind.force_height_above_deck_m = exposed / 2 - depth - deck
 
 
-# Keep the specified seismic weights and coefficients when present.
+# Keep the specified seismic weights and coefficients when present. Vertical seismic is included in every zone: IRC:6-2017
+# cl. 218.3 requires it in zones IV and V and lets it be omitted in zones II and III except for bearings and linkages, stability
+# checks, horizontal cantilevers, prestressed decks and near-field sites, so keeping it covers the bearings and stays conservative.
 def seismic_site(d):
     weather = d[C.KEY_PROJECT_LOCATION]["weather_data"]
     if float(weather["z_value"]) == 0:
