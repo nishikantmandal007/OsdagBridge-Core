@@ -515,6 +515,10 @@ class BridgeConfig:
         carriageway = deck.carriageway_width
         n_girders = geom.n_l
         edge_dist = geom.edge_dist
+        # geom.n_l counts the deck-edge lines too; setu runs report the main girders (bridge._girder_count()).
+        from osdagbridge_core.core.utils.common import KEY_ANALYSIS_ENGINE, ENGINE_SETU
+        if bridge.input_dict.get(KEY_ANALYSIS_ENGINE) == ENGINE_SETU:
+            n_girders = bridge._girder_count()
 
         # Cross-bracing spacing drives the lateral unbraced length for LTB.
         cb_spacing = float(_cbv(inp, KEY_MP_CB_SPACING) or

@@ -1118,6 +1118,11 @@ def build_figure_bmd(ds, force_key, nodes, members, edge_dist=0.0, eng_scale=1.0
         xs, ys, zs, Mz, node_ids = _build_polyline(
             elems, members, nodes, comp_i_name, comp_j_name, ds
         )
+        # setu stores -M at an element's j end (as the shear diagram's last point, flipped above): the far-support moment
+        # keeps its sign only when flipped back, which shows an end moment as hogging, not sagging.
+        if ds.attrs.get("engine") == "setu":
+            Mz = Mz.copy()
+            Mz[-1] = -Mz[-1]
 
         z_base = float(np.mean(zs))
         z_arr  = np.full_like(xs, z_base)
