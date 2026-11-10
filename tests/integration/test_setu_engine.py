@@ -905,3 +905,24 @@ def test_setu_design_corrections(setu_bridge):
     sls_case = next(case for case in engine.states if case.startswith("SLS_RARE_"))
     case = engine.case_demand("G1", sls_case)
     assert sum(case["M_sls_stages_kNm"].values()) == pytest.approx(case["M_sls_kNm"])
+
+
+# The moment diagram's summary keeps the sign of an end moment at the far support (setu stores -M at an element's j end), and
+# the design report counts the main girders, not the deck-edge lines.
+def test_plot_summary_and_girder_count(setu_bridge):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from osdagbridge_core.core.bridge_types.plate_girder.plot_generator import build_figure_bmd
+    b = setu_bridge
+    states, ds = b.grillage_model.states, b.get_results_dataset()
+    nodes, members = b.get_nodes_members()
+    fig, summary = build_figure_bmd(ds.sel(Loadcase="Envelope ULS"), "Mz", nodes, members, edge_dist=b.get_edge_dist())
+    plt.close(fig)
+    for g in range(b._girder_count()):
+        members_ = [states[name][g].composite_moment_kn_m for name in states if name.startswith(("BASIC_", "SEISMIC_"))]
+        high, low = np.max(members_, axis=0), np.min(members_, axis=0)
+        envelope = np.where(abs(high) >= abs(low), high, low)
+        assert summary[f"G{g + 1}"]["max"] == pytest.approx(envelope.max(), abs=0.01)
+        assert summary[f"G{g + 1}"]["min"] == pytest.approx(envelope.min(), abs=0.01)
+    assert b.design_results["n_girders"] == b._girder_count()
