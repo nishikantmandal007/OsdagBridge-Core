@@ -12,6 +12,7 @@ from .bridge_input import (bridge_input, construction_loads, construction_seismi
                            reconcile_layout, seismic_site, temperature_site, wind_site, with_workers_gb, worker_gb, workers_that_fit)
 from .girder_demands import case_demand, deflections_cache, girder_demands
 from .live_load_report import live_load_report_values
+from .permanent_loads import permanent_loads_per_girder
 from .run_progress import RunProgress
 from .plot_dataset import CaseForces, governing_values_of_states, load_states, member_nodes, plot_dataset
 from .unsupported_inputs import check_capability, simplifications
@@ -112,6 +113,9 @@ class SetuAnalysisEngine:
         bridge._build_dtos()
         bridge.material_props = bridge._build_material_props()
         self.bridge_input = bridge_input(bridge)
+        # the span (m) and the main girders, left to right, as the Permanent Load Summary's DC reads them
+        self.L = self.bridge_input.span_m
+        self.girder_props = [self.bridge_input.girders.section_at(k) for k in range(self.bridge_input.girders.count)]
         self.wind = wind_site(bridge.input_dict)
         fill_unequal_depth_wind(self.wind, self.bridge_input)
         self.simplifications = simplifications(bridge)
@@ -143,6 +147,10 @@ class SetuAnalysisEngine:
     def case_demand(self, girder_name, load_case):
         return case_demand(self.states, int(girder_name[1:]) - 1, load_case, self.per_girder_demands[girder_name],
                            self.design_values.dead, self.state_values)
+
+    # SW / DD / DW / SIDL on each girder (kN/m) for the Permanent Load Summary, from the loads setu applies.
+    def permanent_loads_per_girder(self):
+        return permanent_loads_per_girder(self.bridge_input)
 
     # Girder and deck design only need the canonical girder labels here.
     def get_result_data(self):

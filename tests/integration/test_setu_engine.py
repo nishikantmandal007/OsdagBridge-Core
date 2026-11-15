@@ -916,3 +916,19 @@ def test_plot_summary_and_girder_count(setu_bridge):
         assert summary[f"G{g + 1}"]["max"] == pytest.approx(envelope.max(), abs=0.01)
         assert summary[f"G{g + 1}"]["min"] == pytest.approx(envelope.min(), abs=0.01)
     assert b.design_results["n_girders"] == b._girder_count()
+
+
+# The Permanent Load Summary of a setu run holds the whole deck load setu applies in each stage, girder by girder.
+def test_permanent_load_summary(setu_bridge):
+    from setu.irc6.irc_constants import WET_CONCRETE_EXTRA_KN_M3
+    bridge, out = setu_bridge.grillage_model.bridge_input, setu_bridge.output_dict
+    loads = setu_bridge.grillage_model.permanent_loads_per_girder()
+    assert len(loads) == setu_bridge._girder_count()
+    width_m = bridge.width_m()
+    carriageway_m = sum(c.width_m() for c in bridge.cross_section.carriageways())
+    assert sum(g["DD"] for g in loads) == pytest.approx((bridge.concrete.unit_weight_kn_m3 + WET_CONCRETE_EXTRA_KN_M3) * bridge.deck.thickness_m * width_m)
+    assert sum(g["DW"] for g in loads) == pytest.approx(bridge.wearing_course.pressure_kpa * carriageway_m)
+    assert sum(g["SIDL"] for g in loads) == pytest.approx(2 * bridge.added_dead_loads.crash_barrier_kn_per_m)
+    for g, girder in enumerate(loads, start=1):
+        assert girder["SW"] == pytest.approx(setu_bridge.grillage_model.configs[g - 1].section.A_steel * 1e-6 * bridge.steel.unit_weight_kn_m3)
+        assert out[f"{C.KEY_SD_PERMANENT_DL}.G{g}"] == pytest.approx(sum(girder.values()) + out[C.KEY_SD_DL_DC])
