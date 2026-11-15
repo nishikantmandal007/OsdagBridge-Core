@@ -7,10 +7,10 @@ from setu import (AddedDeadLoads, Bracing, BridgeInput, Concrete, DeckCrossSecti
 from setu.builder.mesh import stations_along_span
 from setu.irc6.wind import CYCLONE_COAST, INLAND, OFFSHORE, drag_depth_m, exposed_depth_m, service_drag_coefficient
 from setu.postprocess.construction import ConstructionLoads
-from osdagbridge_core.core.bridge_types.plate_girder.analyser import BridgeGrillageModel
-from osdagbridge_core.core.utils import common as C
-from osdagbridge_core.core.utils.codes.irc6_2017 import IRC6_2017
-from osdagbridge_core.core.bridge_types.plate_girder.bridge_geometry import CrossSectionLayout
+from osdagbridge_core.bridge_types.plate_girder.analyser import BridgeGrillageModel
+from osdagbridge_core.utils import common as C
+from osdagbridge_core.utils.codes.irc6_2017 import IRC6_2017
+from osdagbridge_core.bridge_types.plate_girder.bridge_geometry import CrossSectionLayout
 
 
 # Peak memory, measured as the system's physical footprint of every process (macOS, Standard mesh) on decks of 3021, 9911 and 18391
@@ -70,15 +70,15 @@ def normalise_gui_bracing(d):
             d[key] = "Yes" if value else "No"
 
 
-# Convert the angle area from square centimetres to square metres.
-def bracing(d):
+# The brace area from the section lookup OsdagBridge's own bracing design uses (cm2 to m2), doubled for a double section.
+def bracing(bridge):
+    d = bridge.input_dict
     arrangement = {"X-Bracing": "X", "K-Bracing": "K"}[brace_value(d, C.KEY_MP_CB_TYPE)]
     arrangement += "T" if brace_value(d, C.KEY_MP_CB_TOP_CHORD) == "Yes" else ""
     # setu's K-bracing has no bottom chord; simplifications() says so.
     arrangement += "B" if brace_value(d, C.KEY_MP_CB_BOTTOM_CHORD) == "Yes" and arrangement[0] == "X" else ""
     section = brace_value(d, C.KEY_MP_CB_BRACING_SECTION_TYPE)
-    lookup = C.get_channel_section_properties if "Channel" in section else C.get_angle_section_properties
-    area = lookup(brace_value(d, C.KEY_MP_CB_BRACING_SECTION_DESIGNATION))["Area"] * 1e-4
+    area = bridge._query_crossbracing_section(brace_value(d, C.KEY_MP_CB_BRACING_SECTION_DESIGNATION))["A"] * 1e-4
     if section.startswith("Double"):
         area *= 2
     return Bracing(arrangement, int(d[C.KEY_MP_CB_NO_OF_CROSS_BRACINGS]) + 2, area,
@@ -159,7 +159,7 @@ def bridge_input(bridge):
     return BridgeInput(
         float(d[C.KEY_SPAN]), math.tan(math.radians(float(d[C.KEY_SKEW_ANGLE]))), cross_section(d),
         DeckSlab(float(d[C.KEY_TS_DECK_THICKNESS]) / 1000, float(d[C.KEY_TS_DECK_OVERHANG]), float(d[C.KEY_WC_THICKNESS]) / 1000),
-        girder_sections(bridge), bracing(d), mesh_settings(d),
+        girder_sections(bridge), bracing(bridge), mesh_settings(d),
         steel_material(bridge), concrete_material(d), float(d[C.KEY_WC_DENSITY]), added_dead_loads(d))
 
 
@@ -169,7 +169,7 @@ def site_override(d, mode, value):
         return None
     if d[mode] == "Custom":
         return float(d[value])
-    raise ValueError(f"{mode}={d[mode]!r}: choose the ospgrillage analysis engine")
+    raise ValueError(f"{mode}={d[mode]!r} is not supported by the analysis: use Automatic or Custom")
 
 
 K4_REGIONS = {C.K4_OTHER: INLAND, C.K4_CYCLONE_COAST: CYCLONE_COAST, C.K4_OFFSHORE: OFFSHORE}

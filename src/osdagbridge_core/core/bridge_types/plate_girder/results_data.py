@@ -924,9 +924,10 @@ def _peak_location(ds, lc, element_map, component, nodes_coords):
     best_abs, location = 0.0, None
     for (_, n1, n2), (val_i, val_j) in zip(element_map, values):
         for val, node in ((val_i, n1), (val_j, n2)):
-            if abs(val) > best_abs and node in nodes_coords:
+            if abs(val) > best_abs:
                 best_abs = abs(val)
-                location = round(nodes_coords[node][0], 3)
+                if node in nodes_coords:   # as the original loop: a node without coordinates keeps the last location
+                    location = round(nodes_coords[node][0], 3)
     return location
 
 

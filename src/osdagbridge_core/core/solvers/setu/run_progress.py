@@ -1,7 +1,7 @@
 import json
 from time import perf_counter
 
-from osdagbridge_core.core.utils.logger import bridge_logger
+from osdagbridge_core.utils.logger import bridge_logger
 
 # The setu analysis fills the progress bar from FIRST_PCT to LAST_PCT (Stage 4G).
 FIRST_PCT, LAST_PCT = 16, 66

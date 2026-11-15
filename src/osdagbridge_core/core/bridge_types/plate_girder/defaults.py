@@ -299,10 +299,10 @@ def _update_loading_tab_defaults(input_dict: dict) -> None:
     _update(KEY_PL_SELF_WEIGHT_FACTOR,      "1.00")
 
     # ── Live Load ──────────────────────────────────────────────────────────
-    not_setu = input_dict.get(KEY_ANALYSIS_ENGINE, ENGINE_SETU) != ENGINE_SETU
     _update(KEY_LL_IRC_CLASS_A,             True)
-    _update(KEY_LL_IRC_AA_WHEELED,          not_setu)
-    _update(KEY_LL_IRC_AA_TRACKED,          not_setu)
+    # Class AA was deleted by IRC:6-2017 Amendment 10 (cl. 201.1, Annex A): off by default for both engines
+    _update(KEY_LL_IRC_AA_WHEELED,          False)
+    _update(KEY_LL_IRC_AA_TRACKED,          False)
     _update(KEY_LL_IRC_70R_WHEELED,         True)
     _update(KEY_LL_IRC_70R_TRACKED,         True)
     _update(KEY_LL_IRC_70R_BOGIE,           True)
@@ -311,9 +311,8 @@ def _update_loading_tab_defaults(input_dict: dict) -> None:
     _update(KEY_LL_CONGESTION,              False)
     _update(KEY_LL_CROWD_LOAD,              False)
     _update(KEY_LL_IRC_CLASS_FATIGUE,       True)
-    # Braking load for Class SV is opt-in (own checkbox); seed to match its
-    # schema default_checked so the table matches the displayed checkbox.
-    _update(KEY_BL_IRC_CLASS_SV,            not_setu)
+    # Class SV takes no braking load (IRC:6-2017 cl. 204.5.4): off by default for both engines
+    _update(KEY_BL_IRC_CLASS_SV,            False)
     _update(KEY_LL_CUSTOM_VEHICLES,         [])
     _update(KEY_LL_ECCENTRICITY,            "1.2")
     _update(KEY_LL_FOOTPATH_PRESSURE_MODE,  "As per IRC 6")

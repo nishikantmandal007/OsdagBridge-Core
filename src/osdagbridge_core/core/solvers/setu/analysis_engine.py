@@ -2,9 +2,9 @@ import os
 from time import perf_counter
 
 from setu.postprocess.own_process import solve_in_own_process
-from osdagbridge_core.core.bridge_types.plate_girder.designer import BridgeConfig
-from osdagbridge_core.core.utils import common as C
-from osdagbridge_core.core.utils.logger import bridge_logger
+from osdagbridge_core.bridge_types.plate_girder.designer import BridgeConfig
+from osdagbridge_core.utils import common as C
+from osdagbridge_core.utils.logger import bridge_logger
 from .free_memory import available_memory_gb
 from setu.irc6.temperature import effective_temperature_range
 from setu.irc6.wind import design_wind_speed_mps, wind_pressure_pa

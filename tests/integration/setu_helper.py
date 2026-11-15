@@ -1,6 +1,6 @@
 import copy
-from osdagbridge_core.core.bridge_types.plate_girder import defaults
-from osdagbridge_core.core.utils import common as C
+from osdagbridge_core.bridge_types.plate_girder import defaults
+from osdagbridge_core.utils import common as C
 
 
 # the default GUI inputs plus the fields the GUI dialogs fill in

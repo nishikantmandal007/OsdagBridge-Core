@@ -426,6 +426,10 @@ class PlateGirderBridge:
         """
         self.input_dict = self._normalize_input_dict(input_dict)
         self.input_dict.setdefault(KEY_ANALYSIS_ENGINE, ENGINE_SETU)  # .osi files saved before the engine choice
+        # Class SV takes no braking load (IRC:6-2017 cl. 204.5.4): disabled for both engines, even when an .osi has it ticked
+        if self.input_dict.get(KEY_BL_IRC_CLASS_SV):
+            bridge_logger.warning("Braking load for Class SV is not applied (IRC:6-2017 cl. 204.5.4); it has been switched off")
+        self.input_dict[KEY_BL_IRC_CLASS_SV] = False
         self.basic_inputs = {
             k: v for k, v in self.input_dict.items()
             if k in self._BASIC_INPUT_KEYS
@@ -746,9 +750,9 @@ class PlateGirderBridge:
             # Stage 2: Bridge Layout Solving
             self._run_stage("2", self._solve_bridge_layout)
             
-            from osdagbridge_core.core.utils.common import KEY_ANALYSIS_ENGINE, ENGINE_SETU
+            from osdagbridge_core.utils.common import KEY_ANALYSIS_ENGINE, ENGINE_SETU
             if self.input_dict[KEY_ANALYSIS_ENGINE] == ENGINE_SETU:
-                from osdagbridge_core.core.solvers.setu.analysis_engine import run_analysis
+                from osdagbridge_core.solvers.setu.analysis_engine import run_analysis
                 self._run_stage("4G", run_analysis, self)
             else:
                 # Stage 3: Grillage Setup
@@ -2613,10 +2617,10 @@ class PlateGirderBridge:
 
     def cross_bracing_forces(self):
         """The cross-bracing force reader for this bridge's analysis engine: setu's member forces or the grillage's panel shears."""
-        from osdagbridge_core.core.bridge_types.plate_girder.crossbracingforces import CrossBracingForces
+        from osdagbridge_core.bridge_types.plate_girder.crossbracingforces import CrossBracingForces
 
         if self.input_dict[KEY_ANALYSIS_ENGINE] == ENGINE_SETU:
-            from osdagbridge_core.core.solvers.setu.bracing_forces import SetuCrossBracingForces as CrossBracingForces
+            from osdagbridge_core.solvers.setu.bracing_forces import SetuCrossBracingForces as CrossBracingForces
         return CrossBracingForces(bridge=self)
 
     def _design_cross_bracing_members(self) -> dict:
@@ -2642,7 +2646,7 @@ class PlateGirderBridge:
         from osdagbridge_core.core.bridge_types.plate_girder.crossbracingforces import EndDiaphragmForces
 
         if self.input_dict[KEY_ANALYSIS_ENGINE] == ENGINE_SETU:
-            from osdagbridge_core.core.solvers.setu.bracing_forces import SetuEndDiaphragmForces as EndDiaphragmForces
+            from osdagbridge_core.solvers.setu.bracing_forces import SetuEndDiaphragmForces as EndDiaphragmForces
         ed_forces = EndDiaphragmForces(bridge=self, pair_to_elements={})
         return ed_forces.design()
 
@@ -3392,7 +3396,7 @@ class PlateGirderBridge:
                 M_construction_kNm   = lc_demand.get("M_construction_kNm",  0.0),
                 M_girder_sw_kNm      = lc_demand.get("M_girder_sw_kNm",     0.0),
                 M_sls_kNm            = lc_demand.get("M_sls_kNm",           0.0),
-                M_sls_stages_kNm     = lc_demand.get("M_sls_stages_kNm"),   # setu only
+                M_sls_stages_kNm     = lc_demand.get("M_sls_stages_kNm"),   # when the analysis splits M_sls by stage
                 V_sls_kN             = lc_demand.get("V_sls_kN",            0.0),
                 delta_live_mm        = lc_demand.get("delta_live_mm",       0.0),
                 delta_total_mm       = lc_demand.get("delta_total_mm",      0.0),

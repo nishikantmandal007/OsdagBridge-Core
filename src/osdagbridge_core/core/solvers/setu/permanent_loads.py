@@ -8,11 +8,6 @@ from setu.loads.dead_loads import girder_tributary_width_m, line_loads_across
 from setu.models.sections import girder_properties
 
 
-# The permanent load on each girder G1..Gn (kN/m) for the "Permanent Load Summary" table, from the loads setu applies
-# (setu.loads.dead_loads): SW the girder's own weight, DD the wet slab, DW the wearing course on the carriageway, SIDL the
-# footpath plus the kerb / median / crash barrier / railing lines. Area loads go by each girder's strip of the deck (edges
-# halfway to the next girder, outer strips to the deck edge); a line load is split between the girders either side of it by
-# lever rule, or goes wholly to the outer girder beyond it — as permanent_loads_per_girder does for ospgrillage.
 def permanent_loads_per_girder(bridge):
     lines_m = build_mesh(bridge).girder_lines_m
     model = SimpleNamespace(bridge=bridge, mesh=SimpleNamespace(girder_lines_m=lines_m))

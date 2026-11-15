@@ -1,7 +1,7 @@
 from setu.irc6.irc_constants import CONSTRUCTION_DEAD_FACTORS, VARIABLE_LOAD_FACTORS
 from setu.postprocess.girder_response import STEEL_SELF_WEIGHT, SUPERIMPOSED, SURFACING_STAGE, WET_SLAB
 from setu.utils.constants import DEAD, FREQUENT, LIVE, SURFACING
-from osdagbridge_core.core.bridge_types.plate_girder.designer import (
+from osdagbridge_core.bridge_types.plate_girder.designer import (
     DemandEnvelope, apply_camber_to_deflections_cache)
 
 # Annex B cl. 7.2 as amended by Amendment 10: deflection limits in all structures use Table B.3 column 3 (frequent), live load leading
@@ -17,7 +17,7 @@ def candidates(values, special_vehicle, girder, response, states):
     if special_vehicle is not None:
         found += [v for state in states for v in special_vehicle.girders[girder][response].get(state, {}).values()]
     return found
-from osdagbridge_core.core.utils import common as C
+from osdagbridge_core.utils import common as C
 
 
 # Keep the adverse magnitude used by the designer's force envelopes.

@@ -1,7 +1,7 @@
 from setu.irc6.impact import impact_factor
 from setu.irc6.irc_constants import FATIGUE_TRUCK_AXLE_LOADS_KN, SPECIAL_VEHICLE_AXLE_LOADS_KN
 from setu.irc6.vehicles import CLASS_70R_TRACKED, CLASS_70R_WHEELED, CLASS_A
-from osdagbridge_core.core.utils import common as C
+from osdagbridge_core.utils import common as C
 
 IMPACT_DECIMALS = 3
 LOAD_DECIMALS = 2

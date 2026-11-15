@@ -1,12 +1,12 @@
 import math
 
-from osdagbridge_core.core.utils import common as C
+from osdagbridge_core.utils import common as C
 from .bridge_input import brace_value
 
 
-# Name the input the other engine can handle.
+# Name the input the analysis cannot follow.
 def refuse(key, value):
-    raise ValueError(f"{key}={value!r} has no setu equivalent; choose the ospgrillage analysis engine")
+    raise ValueError(f"{key}={value!r} is not supported by the analysis; change it")
 
 
 # Name a vehicle that neither engine analyses: ospgrillage builds only Class A and 70R cases and leaves it out.
@@ -15,7 +15,7 @@ def refuse_vehicle(key, value):
 
 
 # IRC:6-2017 as amended no longer has these: Class AA (deleted by Amendment 10, cl. 201.1 and Annex A) and braking with Class SV
-# (cl. 204.5.4: no braking on the SV); Class B is for timber bridges.
+# (cl. 204.5.4: no braking on the SV; set_input switches it off before this check); Class B is for timber bridges.
 NOT_IN_IRC = {C.KEY_LL_IRC_AA_WHEELED: "Class AA was deleted by IRC:6 Amendment 10 (cl. 201.1, Annex A)",
               C.KEY_LL_IRC_AA_TRACKED: "Class AA was deleted by IRC:6 Amendment 10 (cl. 201.1, Annex A)",
               C.KEY_BL_IRC_CLASS_SV: "IRC:6 cl. 204.5.4 applies no braking with Class SV"}
@@ -26,7 +26,7 @@ def check_capability(bridge):
     d = bridge.input_dict
     for key, why in NOT_IN_IRC.items():
         if d.get(key):
-            raise ValueError(f"{key}={d[key]!r}: {why}; untick it or choose the ospgrillage analysis engine")
+            raise ValueError(f"{key}={d[key]!r}: {why}; untick it")
     if d.get("loading.live_load.irc.class_b"):
         refuse_vehicle("loading.live_load.irc.class_b", d["loading.live_load.irc.class_b"])
     if d[C.KEY_LL_ROAD_CATEGORY] == C.ROAD_SV_REQUIRED and not d[C.KEY_LL_IRC_CLASS_SV]:
@@ -36,7 +36,7 @@ def check_capability(bridge):
         refuse("temperature_load_kN_m2", d["temperature_load_kN_m2"])
     for key in C.SETU_REQUIRED_VEHICLES:
         if not d[key]:
-            raise ValueError(f"{key} is unticked: setu always searches this IRC vehicle, so tick it or choose the ospgrillage analysis engine")
+            raise ValueError(f"{key} is unticked: the analysis always searches this IRC vehicle, so tick it")
     for key, expected in ((C.KEY_SC_LEFT_SUPPORT, "Pinned"), (C.KEY_SC_RIGHT_SUPPORT, "Roller")):
         if d[key] != expected:
             refuse(key, d[key])
@@ -87,12 +87,6 @@ def simplifications(bridge):
             (C.KEY_MP_ED_BRACING_TYPE, brace_value(d, C.KEY_MP_CB_TYPE)), (C.KEY_MP_ED_BRACING_SECTION, brace_value(d, C.KEY_MP_CB_BRACING_SECTION_TYPE)),
             (C.KEY_MP_ED_BRACING_SECTION_DESIGNATION, brace_value(d, C.KEY_MP_CB_BRACING_SECTION_DESIGNATION)))):
         notes.append("End diaphragms are analysed with the G1-G2 cross-bracing; member design still checks their own sections")
-    changed = [key.rsplit(".", 1)[-1] for key, value in C.SETU_FIXED_DESIGN_FACTORS.items() if key in d and float(d[key]) != float(value)]
-    if changed:
-        notes.append(f"Partial factors {', '.join(changed)} are not read by the girder design: it uses "
-                     + ", ".join(f"{key.rsplit('.', 1)[-1]} = {value}" for key, value in C.SETU_FIXED_DESIGN_FACTORS.items()))
-    if any(key in d and not d[key] for key in C.SETU_ALWAYS_CHECKED):
-        notes.append("Every limit-state check is run: unticking one in Design Options does not skip it")
     # setu holds the deck along the span at one bearing only (girder (count - 1) // 2 at the left end): holding every girder there
     # adds a restraint couple that lowers the girder moments (measured -2.5 % on an edge girder), so the pinned line is modelled so.
     held = (bridge._girder_count() - 1) // 2 + 1

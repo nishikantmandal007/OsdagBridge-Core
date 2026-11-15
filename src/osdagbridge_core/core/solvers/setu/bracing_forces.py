@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from osdagbridge_core.core.bridge_types.plate_girder.crossbracingforces import CrossBracingForces, EndDiaphragmForces
+from osdagbridge_core.bridge_types.plate_girder.crossbracingforces import CrossBracingForces, EndDiaphragmForces
 from .plot_dataset import governing_states
 
 DIAGONALS = ("diagonal_down", "diagonal_up", "k_top_left", "k_top_right", "k_bottom_left", "k_bottom_right")
