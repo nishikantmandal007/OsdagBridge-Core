@@ -378,8 +378,8 @@ class BridgeConfig:
     studs: ShearStudConfig
     fatigue: FatigueConfig
     stiffener: Optional[StiffenerConfig] = None            # None = stiffener checks skipped
-    # The analysis engine ("setu" or "ospgrillage"). The IS 800:2007 corrections below (cl. 8.2.2 βb in LTB, cl. 8.4 shear
-    # resistance in the high-shear interaction, stage-by-stage SLS stresses) apply to setu runs only; ospgrillage runs as before.
+    # The analysis engine ("setu" or "ospgrillage"). The stage-by-stage SLS stresses below apply to setu runs
+    # only; ospgrillage runs as before.
     engine: str = ""
 
     @property
@@ -1210,10 +1210,7 @@ class IRC22CapacityCalculator:
             "alpha_LT" : res["alpha_LT"],
             "phi_LT"   : phi_LT,
             "chi_LT"   : res["chi_LT"],
-            # IS 800:2007 cl. 8.2.2: Md = βb Zp χLT fy / γm0, βb = Ze/Zp for semi-compact sections (taken for slender too);
-            # the clause method computes βb but leaves it out of the moment, so setu runs put it back.
-            "Mb_kNm"   : round(res["Mpl_buckling_kNm"] * (res["beta_b"] if self.cfg.setu else 1.0), 3),
-            "beta_b"   : res["beta_b"],
+            "Mb_kNm"   : res["Mpl_buckling_kNm"],
             "clause"   : res["clause"],
             "source"   : "IRC22_2014",
         }
@@ -2186,7 +2183,6 @@ class IRC22CapacityCalculator:
         combined = self.compute_combined_bending_shear(
             results.Md_kNm, Vu_kN, _Vd_governing
         )
-        combined["Vd_used_kN"] = round(_Vd_governing, 3)
         results.Mdv_kNm = combined["Mdv_kNm"]
         results.beta_interaction = combined["beta"]
         results.details["combined_bending_shear"] = combined

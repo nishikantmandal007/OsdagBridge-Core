@@ -872,8 +872,7 @@ def test_load_states_without_braking(setu_bridge):
     assert BRAKING_CASE not in set(map(str, plot_dataset(values, setu_bridge.get_edge_dist()).Loadcase.values))
 
 
-# setu runs apply IS 800:2007 as written: the high-shear interaction takes the governing shear strength of cl. 8.4 (here the web's
-# buckling strength), LTB takes βb of cl. 8.2.2, and the SLS moment acts stage by stage (steel, long-term, short-term composite).
+# setu runs apply the SLS moment stage by stage (steel, long-term, short-term composite).
 def test_setu_design_corrections(setu_bridge):
     from osdagbridge_core.core.bridge_types.plate_girder.designer import IRC22CapacityCalculator
     engine = setu_bridge.grillage_model
@@ -885,9 +884,7 @@ def test_setu_design_corrections(setu_bridge):
         assert sum(stages.values()) == pytest.approx(demand.M_sls_kNm)
         calc = IRC22CapacityCalculator(config)
         cap = calc.compute_all(Vu_kN=demand.Vu_kN, M_sls_kNm=demand.M_sls_kNm, V_sls_kN=demand.V_sls_kN, M_sls_stages_kNm=stages)
-        assert cap.details["combined_bending_shear"]["Vd_used_kN"] == pytest.approx(min(cap.Vd_kN, cap.Vcr_kN), abs=1e-3)
-        ltb, sec, mat = cap.details["buckling_resistance"], config.section, config.material
-        assert ltb["Mb_kNm"] == pytest.approx(ltb["chi_LT"] * ltb["beta_b"] * sec.Zp_steel * mat.fy / mat.gamma_m0 / 1e6, rel=1e-3)
+        sec = config.section
         comp = calc.compute_composite_section_props(cap.beff_mm)
         bottom = stages["steel"] * 1e6 * sec.y_cg_from_bot / sec.Iz_steel + sum(
             stages[part] * 1e6 * comp[part][C.KEY_COMP_Y_FROM_BOT] / comp[part][C.KEY_COMP_I] for part in ("long_term", "short_term"))
