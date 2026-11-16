@@ -751,6 +751,8 @@ class DemandEnvelope:
     Nsc: int = field(kw_only=True)
     governing_combination: str = "ULS Combination I"
     location: str = "midspan"
+    shear_combination: str = ""                           # combination behind Vu (governing_combination is Mu's)
+    shear_location: str = ""
     member: str = ""
     source: str = "manual"
     M_sls_kNm: float = 0.0
@@ -3795,6 +3797,9 @@ def run_design_check(
                 "stress_range_MPa"    : g_demand.stress_range_MPa,
                 "shear_range_MPa"     : g_demand.shear_range_MPa,
                 "governing_combination": g_demand.governing_combination,
+                "location"            : g_demand.location,
+                "shear_combination"   : g_demand.shear_combination,
+                "shear_location"      : g_demand.shear_location,
                 "Vr_kN"               : g_demand.Vr_kN,
                 "member"              : g_demand.member,
                 "source"              : g_demand.source,

@@ -702,6 +702,14 @@ def ch5_design_checks(checks_data, bridge, chart_paths=None) -> str:
                                _with_unit(ctrl.get("capacity"), ctrl.get("capacity_unit")),
                                _dfmt(ctrl.get("dcr"), nd=3), _fat_status(ctrl.get("status"))])
 
+    # Per girder: the ULS combination giving the maximum bending moment and the one giving the maximum shear force.
+    max_mv_rows = []
+    for _gi, (lbl, _) in enumerate(girder_entries, start=1):
+        dm = (_pg_summary.get(f"G{_gi}", {}) or {}).get("demand") or {}
+        max_mv_rows.append([lbl, _with_unit(dm.get("Mu_kNm"), "kN-m"), _tex(str(dm.get("governing_combination") or "---")),
+                            _tex(str(dm.get("location") or "---")), _with_unit(dm.get("Vu_kN"), "kN"),
+                            _tex(str(dm.get("shear_combination") or "---")), _tex(str(dm.get("shear_location") or "---"))])
+
     # ── Table 5.14: Shear Connector Capacity (bridge-level) ──────────────────
     # Qu (Cl.606.3.1, Eq.6.1) and Qr (Cl.606.3.2) are single per-stud
     # values for the bridge, stored flat inside output_dict["design_results"].
@@ -1409,6 +1417,14 @@ This section presents all structural design checks performed by OsdagBridge. For
     widths=[1.25, 2.2, 2.25, 1.55, 1.55, 0.95, 1.45],
     align=["C", "C", "C", "C", "C", "C", "C"], longtable=True, escape=False) + r"""
 \noindent\textit{Note: UR = Demand / Capacity. A value $\leq 1.0$ indicates a passing check. The controlling check is the criterion with the highest UR for each girder, with the real load case/combination that drives it.}
+
+\vspace{1em}
+""" + render_report_table(
+    "Governing Combinations for Maximum Bending Moment and Shear Force", max_mv_rows,
+    headers=["girder", "max $M_u$", "combination", "at", "max $V_u$", "combination", "at"],
+    widths=[1.25, 1.4, 2.6, 0.9, 1.3, 2.6, 0.9],
+    align=["C", "C", "C", "C", "C", "C", "C"], longtable=True, escape=False) + r"""
+\noindent\textit{Note: Worst ULS combination (basic, seismic where enabled, Class SV where analysed) for each girder, position measured along the girder.}
 
 \vspace{1em}
 

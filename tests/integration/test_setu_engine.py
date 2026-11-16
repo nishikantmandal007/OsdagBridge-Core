@@ -567,6 +567,9 @@ def expected_demand(engine, g, name=None):
     expected.update(Mu_kNm=abs(m.value), Vu_kN=abs(v.value), Nsc=config.fatigue.Nsc,
                     governing_combination=m.combination, location=f"{m.at_m} m", member=f"G{g + 1}", source="setu", lc_type=kind)
     expected["M_sls_stages_kNm"] = None
+    expected.update(shear_combination="", shear_location="")
+    if name is None:
+        expected.update(shear_combination=v.combination, shear_location=f"{v.at_m} m")
     if kind != "ULS":
         expected.update(M_sls_kNm=abs(rare_m.value), V_sls_kN=abs(rare_v.value), M_sls_stages_kNm=sls_stages(values.dead, rare_m, g))
     if kind in ("", "SLS_frequent"):

@@ -35,7 +35,8 @@ def force_demands(values, girder, seismic, special_vehicle=None):
     return dict(Mu_kNm=abs(moment.value), Vu_kN=abs(shear.value),
                 M_sls_kNm=abs(rare_m.value), V_sls_kN=abs(rare_v.value),
                 M_sls_stages_kNm=sls_stages(values.dead, rare_m, girder),
-                governing_combination=moment.combination, location=f"{moment.at_m} m")
+                governing_combination=moment.combination, location=f"{moment.at_m} m",
+                shear_combination=shear.combination, shear_location=f"{shear.at_m} m")
 
 
 # An SLS moment split by the section that carries each part on an unpropped deck (IRC:22 cl. 604.3): the steel's own weight and the
