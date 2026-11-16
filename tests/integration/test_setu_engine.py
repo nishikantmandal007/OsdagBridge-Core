@@ -135,9 +135,9 @@ def test_input_mapping():
     assert mapped.bracing.area_m2 == C.get_angle_section_properties(brace_value(d, C.KEY_MP_CB_BRACING_SECTION_DESIGNATION))["Area"] * 1e-4 * 2
     assert mapped.bracing.steel_grade == d[C.KEY_CROSS_BRACING]
     assert mapped.bracing.end_diaphragm_steel_grade == d[C.KEY_END_DIAPHRAGM]
-    assert d[C.KEY_ANALYSIS_MESH] == "Standard"
+    assert d[C.KEY_ANALYSIS_MESH] == "Fine"
     assert (mapped.mesh.element_length_m, mapped.mesh.support_element_length_m, mapped.mesh.support_zone_m,
-            mapped.mesh.target_size_across_width_m) == (0.5, 0.1, 1.5, 0.15)
+            mapped.mesh.target_size_across_width_m) == (0.25, 0.05, 1.5, 0.10)
     assert not mapped.cross_section.crowd_load and not mapped.cross_section.congestion
     assert vars(mapped.added_dead_loads) == {"footpath_kpa": 0.0, "kerb_kn_per_m": 0.0, "median_kn_per_m": 0.0,
                                              "crash_barrier_kn_per_m": float(d[C.KEY_CB_LOAD]), "railing_kn_per_m": 0.0}
@@ -850,7 +850,7 @@ def test_live_load_report_values(setu_bridge):
     # cl. 208.3 with Amendment 10: 70R wheeled 25 % up to 23 m, then the Class A curve
     assert b.output_dict[C.KEY_LL_IMPACT_FACTOR_70R_WHEELED] == round(1 + 9 / (13.5 + span_m), 3)
     assert b.output_dict[C.KEY_LL_VEHICLE_TOTAL_LOAD_CLASS_SV] == 3850.0
-    assert b.output_dict[C.KEY_ANALYSIS_MESH] == "Standard"
+    assert b.output_dict[C.KEY_ANALYSIS_MESH] == "Fine"
     # IRC:6-2017 Amendment 10 (and Amendment 8 for the fatigue truck) print these in kN
     assert b.output_dict[C.KEY_LL_VEHICLE_TOTAL_LOAD_CLASS_A] == 554.0
     assert b.output_dict[C.KEY_LL_VEHICLE_TOTAL_LOAD_70R_WHEELED] == 1000.0

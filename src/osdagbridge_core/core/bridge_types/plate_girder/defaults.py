@@ -384,7 +384,7 @@ def _update_design_options_defaults(input_dict: dict) -> None:
     _update(KEY_DS_CONSTRUCTION_STAGE,      "Yes")
     _update(KEY_DS_SHUTTERING_LOAD,         "0")  # IRC gives no value: default 0 so the UI runs out of the box; the engineer sets it for the site
     _update(KEY_DS_CONSTRUCTION_LIVE_LOAD,  "0")
-    _update(KEY_ANALYSIS_MESH,              "Standard")
+    _update(KEY_ANALYSIS_MESH,              "Fine")
     _update(KEY_DS_REINF_BOUNDS,            {
                                                 "lower":     None,
                                                 "upper":     None,
